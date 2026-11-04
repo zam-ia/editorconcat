@@ -11132,6 +11132,53 @@ impl Studio {
             ));
             rows.push(rule());
         }
+        // The three looks and the short camera push measured from the
+        // user's MADAME LE FLEUR CapCut draft. They live beside the clip,
+        // where they can be repeated without rebuilding keyframes by hand.
+        // Text preset files still carry the fonts and colours; these verbs
+        // add the timing that a static preset cannot express.
+        if clip.kind == model::ClipKind::Text
+            || clip.kind == model::ClipKind::Video
+            || clip.kind == model::ClipKind::Image
+        {
+            rows.push(MenuItemData {
+                label: "ESTILO CRISDAL".into(),
+                kind: MenuRow::Label,
+                ..Default::default()
+            });
+            if clip.kind == model::ClipKind::Text {
+                rows.push(action(
+                    "crisdal-text-white",
+                    "Manifiesto blanco · 0.5 s".into(),
+                    Glyph::TextMark,
+                    "",
+                    !locked,
+                ));
+                rows.push(action(
+                    "crisdal-text-gold",
+                    "Énfasis dorado · deslizar 0.5 s".into(),
+                    Glyph::TextMark,
+                    "",
+                    !locked,
+                ));
+                rows.push(action(
+                    "crisdal-text-editorial",
+                    "Editorial blanco · 0.4 s".into(),
+                    Glyph::TextMark,
+                    "",
+                    !locked,
+                ));
+            } else {
+                rows.push(action(
+                    "crisdal-camera-push",
+                    "Entrada dinámica · 0.4 s".into(),
+                    Glyph::Frame,
+                    "",
+                    !locked,
+                ));
+            }
+            rows.push(rule());
+        }
         // One slot, two verbs: the sound is either on its picture or off it.
         // Shown on every video clip, so the verb is where a person looks for
         // it, and greyed rather than gone when the file has no sound.
@@ -11927,6 +11974,12 @@ impl Studio {
             return;
         };
         match action {
+            "crisdal-text-white" => self.apply_crisdal_text_preset(id, "crisdal.manifiesto-blanco"),
+            "crisdal-text-gold" => self.apply_crisdal_text_preset(id, "crisdal.enfasis-dorado"),
+            "crisdal-text-editorial" => {
+                self.apply_crisdal_text_preset(id, "crisdal.editorial-blanco")
+            }
+            "crisdal-camera-push" => self.apply_crisdal_camera_push(id),
             "copy" => self.copy_clips(Some(id)),
             "duplicate" => self.duplicate_selected(),
             // Pasted after the clip that was right-clicked, on its lane.
@@ -12005,6 +12058,187 @@ impl Studio {
             }
             _ => {}
         }
+    }
+
+    /// Applies one of the user's CapCut-derived title looks and its motion as
+    /// one undoable edit. The preset supplies the real font file and visual
+    /// style; the title keeps its words. A short clip compresses the two
+    /// half-second edges rather than letting its entrance cross its exit.
+    fn apply_crisdal_text_preset(&mut self, id: &str, preset_id: &str) {
+        let Some(clip) = self.clip(id).cloned() else {
+            return;
+        };
+        if clip.kind != model::ClipKind::Text || self.locked(&clip.track_id) {
+            return;
+        }
+        let Some((mut style, final_y, font)) = self
+            .text_presets
+            .iter()
+            .find(|preset| preset.id == preset_id)
+            .map(|preset| {
+                (
+                    preset.style.clone(),
+                    preset.offset_y.unwrap_or(clip.offset_y),
+                    presets::install_font(&self.host.dirs, preset),
+                )
+            })
+        else {
+            self.notify("No se encontró el preset CRISDAL.", true);
+            return;
+        };
+        if let Some(existing) = clip.text.as_ref() {
+            style.content.clone_from(&existing.content);
+        }
+
+        let mut commands = Vec::new();
+        if let Some((family, path)) = font
+            && !self
+                .project()
+                .fonts
+                .iter()
+                .any(|held| held.family == family)
+        {
+            commands.push(Command::AddFont { family, path });
+        }
+        for property in [
+            model::KeyProperty::Opacity,
+            model::KeyProperty::Scale,
+            model::KeyProperty::OffsetY,
+        ] {
+            commands.extend(clip.keys_on(property).map(|key| Command::ClearClipKey {
+                clip_id: id.to_owned(),
+                property,
+                at: key.at,
+            }));
+        }
+        commands.push(Command::UpdateClip {
+            clip_id: id.to_owned(),
+            patch: ClipPatch {
+                text: Some(Some(style)),
+                ..Default::default()
+            },
+        });
+        commands.push(Command::SetClipTransform {
+            clip_id: id.to_owned(),
+            scale: Some(1.0),
+            offset_x: None,
+            offset_y: Some(final_y),
+            rotation: None,
+            stretch_x: None,
+            stretch_y: None,
+        });
+
+        let seconds = clip.duration.max(f64::from(MIN_DURATION));
+        let edge_seconds = if preset_id == "crisdal.editorial-blanco" {
+            0.4
+        } else {
+            0.5
+        };
+        let edge = (edge_seconds / seconds).clamp(0.01, 0.45);
+        let out = 1.0 - edge;
+        let soft = model::KeyEase([0.22, 1.0, 0.36, 1.0]).sane();
+        for (at, value, ease) in [
+            (0.0, 0.0, model::KeyEase::LINEAR),
+            (edge, 1.0, soft),
+            (out, 1.0, model::KeyEase::LINEAR),
+            (1.0, 0.0, soft),
+        ] {
+            commands.push(Command::SetClipKey {
+                clip_id: id.to_owned(),
+                property: model::KeyProperty::Opacity,
+                at,
+                value,
+                ease,
+            });
+        }
+        if preset_id == "crisdal.manifiesto-blanco" {
+            for (at, value, ease) in [(0.0, 0.94, model::KeyEase::LINEAR), (edge, 1.0, soft)] {
+                commands.push(Command::SetClipKey {
+                    clip_id: id.to_owned(),
+                    property: model::KeyProperty::Scale,
+                    at,
+                    value,
+                    ease,
+                });
+            }
+        } else if preset_id == "crisdal.enfasis-dorado" {
+            for (at, value, ease) in [
+                (0.0, final_y + 0.06, model::KeyEase::LINEAR),
+                (edge, final_y, soft),
+            ] {
+                commands.push(Command::SetClipKey {
+                    clip_id: id.to_owned(),
+                    property: model::KeyProperty::OffsetY,
+                    at,
+                    value,
+                    ease,
+                });
+            }
+        }
+        self.apply(Command::Batch { commands });
+        self.notify("Estilo CRISDAL aplicado.", false);
+    }
+
+    /// The opening move used on the first shot of MADAME LE FLEUR: a quick
+    /// push-in with a small lateral settle. It uses the clip's current
+    /// placement as the destination, so applying it never recentres a crop.
+    fn apply_crisdal_camera_push(&mut self, id: &str) {
+        let Some(clip) = self.clip(id).cloned() else {
+            return;
+        };
+        if !matches!(clip.kind, model::ClipKind::Video | model::ClipKind::Image)
+            || self.locked(&clip.track_id)
+        {
+            return;
+        }
+        let mut commands = Vec::new();
+        for property in [
+            model::KeyProperty::Scale,
+            model::KeyProperty::OffsetX,
+            model::KeyProperty::OffsetY,
+        ] {
+            commands.extend(clip.keys_on(property).map(|key| Command::ClearClipKey {
+                clip_id: id.to_owned(),
+                property,
+                at: key.at,
+            }));
+        }
+        let edge = (0.4 / clip.duration.max(f64::from(MIN_DURATION))).clamp(0.01, 0.95);
+        let soft = model::KeyEase([0.22, 1.0, 0.36, 1.0]).sane();
+        for (property, start, end) in [
+            (
+                model::KeyProperty::Scale,
+                (clip.scale * 0.83).max(0.05),
+                clip.scale,
+            ),
+            (
+                model::KeyProperty::OffsetX,
+                clip.offset_x - 0.08,
+                clip.offset_x,
+            ),
+            (
+                model::KeyProperty::OffsetY,
+                clip.offset_y + 0.03,
+                clip.offset_y,
+            ),
+        ] {
+            commands.push(Command::SetClipKey {
+                clip_id: id.to_owned(),
+                property,
+                at: 0.0,
+                value: start,
+                ease: model::KeyEase::LINEAR,
+            });
+            commands.push(Command::SetClipKey {
+                clip_id: id.to_owned(),
+                property,
+                at: edge,
+                value: end,
+                ease: soft,
+            });
+        }
+        self.apply(Command::Batch { commands });
+        self.notify("Entrada dinámica CRISDAL aplicada.", false);
     }
 
     /// Every clip on an unlocked lane.
