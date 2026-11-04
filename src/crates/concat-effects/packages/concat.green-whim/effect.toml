@@ -1,0 +1,22 @@
+format = 2
+
+[effect]
+id = "concat.green-whim"
+name = "Capricho verde"
+kind = "transition"
+category = "Tendencias"
+order = 4
+description = "Una onda orgánica verde deforma el corte y lo devuelve limpio."
+
+[[param]]
+key = "energy"
+label = "Energía"
+min = 0
+max = 100
+default = 55
+step = 1
+unit = "%"
+
+[transition]
+entry = "effect.wgsl"
+fallback = "cross-fade"

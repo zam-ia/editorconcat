@@ -1,0 +1,22 @@
+format = 2
+
+[effect]
+id = "concat.chromatic-boxes"
+name = "Cajas cromáticas"
+kind = "transition"
+category = "Falla"
+order = 8
+description = "Bloques digitales y canales RGB desfasados rompen el punto de corte."
+
+[[param]]
+key = "amount"
+label = "Cantidad"
+min = 0
+max = 100
+default = 68
+step = 1
+unit = "%"
+
+[transition]
+entry = "effect.wgsl"
+fallback = "cross-fade"

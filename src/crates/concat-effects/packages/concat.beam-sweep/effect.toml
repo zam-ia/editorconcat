@@ -1,0 +1,23 @@
+format = 2
+
+[effect]
+id = "concat.beam-sweep"
+name = "Barrido de haz"
+kind = "transition"
+category = "Clásica"
+order = 5
+description = "Un haz diagonal luminoso barre el cuadro y revela el plano entrante."
+
+[[param]]
+key = "brightness"
+label = "Brillo"
+min = 0
+max = 100
+default = 64
+step = 1
+unit = "%"
+
+[transition]
+entry = "effect.wgsl"
+xfade = "wipeleft"
+fallback = "cross-fade"

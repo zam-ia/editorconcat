@@ -1,0 +1,22 @@
+format = 2
+
+[effect]
+id = "concat.shattered-glass"
+name = "Cristal roto"
+kind = "transition"
+category = "Tendencias"
+order = 3
+description = "Fragmentos irregulares separan el plano saliente y descubren el siguiente."
+
+[[param]]
+key = "scatter"
+label = "Dispersión"
+min = 0
+max = 100
+default = 58
+step = 1
+unit = "%"
+
+[transition]
+entry = "effect.wgsl"
+fallback = "cross-fade"

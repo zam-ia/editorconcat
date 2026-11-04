@@ -11168,6 +11168,76 @@ impl Studio {
                     "",
                     !locked,
                 ));
+
+                // CapCut's text-animation panel is hundreds of downloadable
+                // packages, but most of its everyday entries reduce to the
+                // same cheap primitives: opacity, placement, scale, rotation
+                // and a reveal mask. Keep those primitives as native keys so
+                // the useful vocabulary is available offline without making
+                // the editor carry CapCut's packages or a second renderer.
+                rows.push(rule());
+                rows.push(MenuItemData {
+                    label: "ANIMACIONES DE TEXTO · ENTRADA".into(),
+                    kind: MenuRow::Label,
+                    ..Default::default()
+                });
+                for (id, label) in [
+                    ("text-in-fade", "Desvanecer letras"),
+                    ("text-in-slide-up", "Deslizar hacia arriba"),
+                    ("text-in-slide-down", "Deslizar hacia abajo"),
+                    ("text-in-slide-left", "Deslizar desde la izquierda"),
+                    ("text-in-slide-right", "Deslizar desde la derecha"),
+                    ("text-in-zoom", "Zoom suave"),
+                    ("text-in-pop", "Rebote / Pop"),
+                    ("text-in-spin", "Giro de entrada"),
+                    ("text-in-blur", "Desenfoque difuso"),
+                    ("text-in-typewriter", "Rastro del cursor"),
+                    ("text-in-one-by-one", "Uno por uno"),
+                    ("text-in-binary", "Letras binarias"),
+                ] {
+                    rows.push(action(id, label.into(), Glyph::TextMark, "", !locked));
+                }
+                rows.push(MenuItemData {
+                    label: "ANIMACIONES DE TEXTO · SALIDA".into(),
+                    kind: MenuRow::Label,
+                    ..Default::default()
+                });
+                for (id, label) in [
+                    ("text-out-fade", "Desaparición progresiva"),
+                    ("text-out-slide-up", "Salir hacia arriba"),
+                    ("text-out-slide-down", "Salir hacia abajo"),
+                    ("text-out-slide-left", "Salir hacia la izquierda"),
+                    ("text-out-slide-right", "Salir hacia la derecha"),
+                    ("text-out-shrink", "Reducir y desaparecer"),
+                    ("text-out-spin", "Giro de salida"),
+                    ("text-out-wipe", "Borrado con cursor"),
+                ] {
+                    rows.push(action(id, label.into(), Glyph::TextMark, "", !locked));
+                }
+                rows.push(MenuItemData {
+                    label: "ANIMACIONES DE TEXTO · BUCLE".into(),
+                    kind: MenuRow::Label,
+                    ..Default::default()
+                });
+                for (id, label) in [
+                    ("text-loop-pulse", "Pulso"),
+                    ("text-loop-float", "Flotar"),
+                    ("text-loop-bounce", "Rebote continuo"),
+                    ("text-loop-shake", "Sacudida"),
+                    ("text-loop-swing", "Balanceo"),
+                    ("text-loop-breathe", "Respirar"),
+                    ("text-loop-blink", "Parpadeo"),
+                    ("text-loop-spin", "Giro continuo"),
+                ] {
+                    rows.push(action(id, label.into(), Glyph::TextMark, "", !locked));
+                }
+                rows.push(action(
+                    "text-motion-reset",
+                    "Quitar animación de texto".into(),
+                    Glyph::Trash,
+                    "",
+                    !locked,
+                ));
             } else {
                 rows.push(action(
                     "crisdal-camera-push",
@@ -11980,6 +12050,7 @@ impl Studio {
                 self.apply_crisdal_text_preset(id, "crisdal.editorial-blanco")
             }
             "crisdal-camera-push" => self.apply_crisdal_camera_push(id),
+            motion if motion.starts_with("text-") => self.apply_text_motion_preset(id, motion),
             "copy" => self.copy_clips(Some(id)),
             "duplicate" => self.duplicate_selected(),
             // Pasted after the clip that was right-clicked, on its lane.
@@ -12239,6 +12310,339 @@ impl Studio {
         }
         self.apply(Command::Batch { commands });
         self.notify("Entrada dinámica CRISDAL aplicada.", false);
+    }
+
+    /// Applies the compact motion vocabulary behind CapCut's most useful text
+    /// animations. These are ordinary project keyframes, not opaque packages:
+    /// they preview and export through the same path as hand-authored motion,
+    /// remain editable, and add no steady-state memory cost.
+    fn apply_text_motion_preset(&mut self, id: &str, preset: &str) {
+        let Some(clip) = self.clip(id).cloned() else {
+            return;
+        };
+        if clip.kind != model::ClipKind::Text || self.locked(&clip.track_id) {
+            return;
+        }
+
+        let animated = [
+            model::KeyProperty::Opacity,
+            model::KeyProperty::Scale,
+            model::KeyProperty::OffsetX,
+            model::KeyProperty::OffsetY,
+            model::KeyProperty::Rotation,
+        ];
+        let mut commands = Vec::new();
+        for property in animated {
+            commands.extend(clip.keys_on(property).map(|key| Command::ClearClipKey {
+                clip_id: id.to_owned(),
+                property,
+                at: key.at,
+            }));
+        }
+        if preset == "text-motion-reset" {
+            for property in model::KeyProperty::MASK {
+                commands.extend(clip.keys_on(property).map(|key| Command::ClearClipKey {
+                    clip_id: id.to_owned(),
+                    property,
+                    at: key.at,
+                }));
+            }
+            self.apply(Command::Batch { commands });
+            self.notify("Animación de texto eliminada.", false);
+            return;
+        }
+
+        let seconds = clip.duration.max(f64::from(MIN_DURATION));
+        let edge = (0.5 / seconds).clamp(0.01, 0.45);
+        let out = 1.0 - edge;
+        let soft = model::KeyEase([0.22, 1.0, 0.36, 1.0]).sane();
+        let smooth = model::KeyEase([0.4, 0.0, 0.2, 1.0]).sane();
+        let linear = model::KeyEase::LINEAR;
+        let opacity = clip.opacity;
+        let scale = clip.scale;
+        let x = clip.offset_x;
+        let y = clip.offset_y;
+        let rotation = clip.rotation;
+
+        // Macros keep the command builder borrow short. Two nested mutable
+        // closures would retain a borrow of `commands` for the whole match and
+        // reject presets which also clear or update the clip mask.
+        macro_rules! key {
+            ($property:expr, $at:expr, $value:expr, $ease:expr $(,)?) => {
+                commands.push(Command::SetClipKey {
+                    clip_id: id.to_owned(),
+                    property: $property,
+                    at: $at,
+                    value: $value,
+                    ease: $ease,
+                })
+            };
+        }
+        macro_rules! two {
+            ($property:expr, $a:expr, $av:expr, $b:expr, $bv:expr, $ease:expr $(,)?) => {{
+                key!($property, $a, $av, linear);
+                key!($property, $b, $bv, $ease);
+            }};
+        }
+
+        match preset {
+            "text-in-fade" => two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft),
+            "text-in-slide-up" => {
+                two!(model::KeyProperty::OffsetY, 0.0, y + 0.12, edge, y, soft);
+                two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft);
+            }
+            "text-in-slide-down" => {
+                two!(model::KeyProperty::OffsetY, 0.0, y - 0.12, edge, y, soft);
+                two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft);
+            }
+            "text-in-slide-left" => {
+                two!(model::KeyProperty::OffsetX, 0.0, x - 0.35, edge, x, soft);
+                two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft);
+            }
+            "text-in-slide-right" => {
+                two!(model::KeyProperty::OffsetX, 0.0, x + 0.35, edge, x, soft);
+                two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft);
+            }
+            "text-in-zoom" => {
+                two!(
+                    model::KeyProperty::Scale,
+                    0.0,
+                    scale * 0.55,
+                    edge,
+                    scale,
+                    soft
+                );
+                two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft);
+            }
+            "text-in-pop" => {
+                key!(model::KeyProperty::Scale, 0.0, scale * 0.4, linear);
+                key!(model::KeyProperty::Scale, edge * 0.72, scale * 1.12, soft);
+                key!(model::KeyProperty::Scale, edge, scale, smooth);
+                two!(
+                    model::KeyProperty::Opacity,
+                    0.0,
+                    0.0,
+                    edge * 0.45,
+                    opacity,
+                    soft
+                );
+            }
+            "text-in-spin" => {
+                two!(
+                    model::KeyProperty::Rotation,
+                    0.0,
+                    rotation - 90.0,
+                    edge,
+                    rotation,
+                    soft
+                );
+                two!(
+                    model::KeyProperty::Scale,
+                    0.0,
+                    scale * 0.65,
+                    edge,
+                    scale,
+                    soft
+                );
+                two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft);
+            }
+            "text-in-blur" => {
+                // Concat has no keyframed text blur yet. A soft zoom plus a
+                // fade gives the same readable diffuse-arrival silhouette.
+                two!(
+                    model::KeyProperty::Scale,
+                    0.0,
+                    scale * 1.22,
+                    edge,
+                    scale,
+                    smooth
+                );
+                two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, smooth);
+            }
+            "text-in-binary" => {
+                for (at, dx, a) in [
+                    (0.0, -0.08, 0.0),
+                    (edge * 0.24, 0.07, opacity * 0.35),
+                    (edge * 0.48, -0.04, opacity * 0.62),
+                    (edge * 0.72, 0.025, opacity * 0.82),
+                    (edge, 0.0, opacity),
+                ] {
+                    key!(model::KeyProperty::OffsetX, at, x + dx, linear);
+                    key!(model::KeyProperty::Opacity, at, a, linear);
+                }
+            }
+            "text-in-typewriter" | "text-in-one-by-one" => {
+                for property in model::KeyProperty::MASK {
+                    commands.extend(clip.keys_on(property).map(|held| Command::ClearClipKey {
+                        clip_id: id.to_owned(),
+                        property,
+                        at: held.at,
+                    }));
+                }
+                commands.push(Command::UpdateClip {
+                    clip_id: id.to_owned(),
+                    patch: ClipPatch {
+                        mask: Some(Some(model::ClipMask {
+                            x: 0.0,
+                            width: model::ClipMask::MAX_SIZE,
+                            height: model::ClipMask::MAX_SIZE,
+                            ..model::ClipMask::of(model::MaskShape::Rectangle)
+                        })),
+                        ..Default::default()
+                    },
+                });
+                key!(model::KeyProperty::MaskX, 0.0, -1.95, linear);
+                key!(model::KeyProperty::MaskX, edge, 0.0, smooth);
+                key!(model::KeyProperty::MaskWidth, 0.0, 0.01, linear);
+                key!(
+                    model::KeyProperty::MaskWidth,
+                    edge,
+                    model::ClipMask::MAX_SIZE,
+                    smooth,
+                );
+            }
+            "text-out-fade" => {
+                two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth)
+            }
+            "text-out-slide-up" => {
+                two!(model::KeyProperty::OffsetY, out, y, 1.0, y - 0.12, smooth);
+                two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
+            }
+            "text-out-slide-down" => {
+                two!(model::KeyProperty::OffsetY, out, y, 1.0, y + 0.12, smooth);
+                two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
+            }
+            "text-out-slide-left" => {
+                two!(model::KeyProperty::OffsetX, out, x, 1.0, x - 0.35, smooth);
+                two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
+            }
+            "text-out-slide-right" => {
+                two!(model::KeyProperty::OffsetX, out, x, 1.0, x + 0.35, smooth);
+                two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
+            }
+            "text-out-shrink" => {
+                two!(
+                    model::KeyProperty::Scale,
+                    out,
+                    scale,
+                    1.0,
+                    scale * 0.35,
+                    smooth
+                );
+                two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
+            }
+            "text-out-spin" => {
+                two!(
+                    model::KeyProperty::Rotation,
+                    out,
+                    rotation,
+                    1.0,
+                    rotation + 90.0,
+                    smooth
+                );
+                two!(
+                    model::KeyProperty::Scale,
+                    out,
+                    scale,
+                    1.0,
+                    scale * 0.5,
+                    smooth
+                );
+                two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
+            }
+            "text-out-wipe" => {
+                two!(model::KeyProperty::OffsetX, out, x, 1.0, x + 0.12, smooth);
+                two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
+            }
+            "text-loop-pulse" => {
+                for (at, value) in [
+                    (0.0, scale),
+                    (0.25, scale * 1.08),
+                    (0.5, scale),
+                    (0.75, scale * 1.05),
+                    (1.0, scale),
+                ] {
+                    key!(model::KeyProperty::Scale, at, value, smooth);
+                }
+            }
+            "text-loop-float" => {
+                for (at, value) in [(0.0, y + 0.02), (0.5, y - 0.02), (1.0, y + 0.02)] {
+                    key!(model::KeyProperty::OffsetY, at, value, smooth);
+                }
+            }
+            "text-loop-bounce" => {
+                for (at, value) in [
+                    (0.0, y),
+                    (0.2, y - 0.065),
+                    (0.4, y),
+                    (0.65, y - 0.035),
+                    (0.82, y),
+                    (1.0, y),
+                ] {
+                    key!(model::KeyProperty::OffsetY, at, value, soft);
+                }
+            }
+            "text-loop-shake" => {
+                for (at, value) in [
+                    (0.0, x),
+                    (0.12, x - 0.025),
+                    (0.24, x + 0.025),
+                    (0.36, x - 0.018),
+                    (0.48, x + 0.018),
+                    (0.6, x - 0.01),
+                    (0.72, x + 0.01),
+                    (1.0, x),
+                ] {
+                    key!(model::KeyProperty::OffsetX, at, value, linear);
+                }
+            }
+            "text-loop-swing" => {
+                for (at, value) in [
+                    (0.0, rotation),
+                    (0.25, rotation - 5.0),
+                    (0.5, rotation + 5.0),
+                    (0.75, rotation - 3.0),
+                    (1.0, rotation),
+                ] {
+                    key!(model::KeyProperty::Rotation, at, value, smooth);
+                }
+            }
+            "text-loop-breathe" => {
+                for (at, value) in [(0.0, opacity * 0.72), (0.5, opacity), (1.0, opacity * 0.72)] {
+                    key!(model::KeyProperty::Opacity, at, value, smooth);
+                }
+            }
+            "text-loop-blink" => {
+                for (at, value) in [
+                    (0.0, opacity),
+                    (0.24, opacity),
+                    (0.25, 0.0),
+                    (0.32, 0.0),
+                    (0.33, opacity),
+                    (0.74, opacity),
+                    (0.75, 0.0),
+                    (0.82, 0.0),
+                    (0.83, opacity),
+                    (1.0, opacity),
+                ] {
+                    key!(model::KeyProperty::Opacity, at, value, linear);
+                }
+            }
+            "text-loop-spin" => {
+                two!(
+                    model::KeyProperty::Rotation,
+                    0.0,
+                    rotation,
+                    1.0,
+                    rotation + 360.0,
+                    linear,
+                );
+            }
+            _ => return,
+        }
+
+        self.apply(Command::Batch { commands });
+        self.notify("Animación de texto aplicada.", false);
     }
 
     /// Every clip on an unlocked lane.

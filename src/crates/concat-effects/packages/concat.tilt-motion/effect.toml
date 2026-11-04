@@ -1,0 +1,22 @@
+format = 2
+
+[effect]
+id = "concat.tilt-motion"
+name = "Movimiento inclinado"
+kind = "transition"
+category = "Cámara"
+order = 7
+description = "La cámara se inclina y desplaza con inercia al pasar de un plano al otro."
+
+[[param]]
+key = "tilt"
+label = "Inclinación"
+min = 0
+max = 100
+default = 48
+step = 1
+unit = "%"
+
+[transition]
+entry = "effect.wgsl"
+fallback = "cross-fade"

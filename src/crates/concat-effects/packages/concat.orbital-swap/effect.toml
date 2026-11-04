@@ -1,0 +1,22 @@
+format = 2
+
+[effect]
+id = "concat.orbital-swap"
+name = "Intercambio orbital"
+kind = "transition"
+category = "Tendencias"
+order = 2
+description = "Ambos planos giran alrededor del centro mientras intercambian su lugar."
+
+[[param]]
+key = "turn"
+label = "Giro"
+min = 0
+max = 100
+default = 60
+step = 1
+unit = "%"
+
+[transition]
+entry = "effect.wgsl"
+fallback = "cross-fade"

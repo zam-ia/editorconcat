@@ -1,0 +1,23 @@
+format = 2
+
+[effect]
+id = "concat.circular-mix"
+name = "Mezcla circular"
+kind = "transition"
+category = "Tendencias"
+order = 1
+description = "La imagen entrante se abre desde el centro con un borde circular suave."
+
+[[param]]
+key = "softness"
+label = "Suavidad"
+min = 0
+max = 100
+default = 32
+step = 1
+unit = "%"
+
+[transition]
+entry = "effect.wgsl"
+xfade = "circleopen"
+fallback = "cross-fade"
