@@ -1532,6 +1532,8 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                 return;
             }
             state.clip_action(&id, action.as_str());
+        } else {
+            state.timeline_action(action.as_str());
         }
     }));
 

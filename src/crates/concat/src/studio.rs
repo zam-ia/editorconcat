@@ -49,7 +49,9 @@ mod consolidate;
 use consolidate::MergeJob;
 mod masking;
 use masking::{MaskFrame, MaskGrip};
+mod timeline_cache;
 use slint::{Model, ModelRc, SharedString, VecModel};
+use timeline_cache::{TimelineRenderCache, TimelineRenderJob};
 
 use crate::dock::{
     Dock, DockLayout, SEAT_GAP, default_dock, lay_out, nearest_row, row_at, row_top,
@@ -860,6 +862,10 @@ pub struct Studio {
     pub clipboard: Vec<Held>,
     /// The monitor: its frame, and the requests for the next.
     pub monitor: crate::panes::monitor::MonitorPane,
+    /// A manually rendered preview and the render still making one. Both are
+    /// view state: edits invalidate the revision without touching the project.
+    timeline_render: Option<TimelineRenderCache>,
+    timeline_render_job: Option<TimelineRenderJob>,
 
     // ── the sheets and menus ──
     pub export: crate::panes::export::ExportPane,
@@ -2353,6 +2359,8 @@ impl Studio {
             enhance_ticked: HashSet::new(),
             reverse_jobs: HashMap::new(),
             merge_job: None,
+            timeline_render: None,
+            timeline_render_job: None,
             region_job: None,
             pending_stroke: None,
             tripped_strokes: HashSet::new(),
@@ -2886,6 +2894,13 @@ impl Studio {
         // A library file on the monitor: its clip alone, flattened once.
         if let Some(source) = self.source.as_ref() {
             return Some((std::sync::Arc::clone(&source.clips), session.settings()));
+        }
+        // A manual timeline render is a single, baked clip at monitor size.
+        // It is used only inside the range that was requested and only while
+        // its document revision is still current; an edit falls through to
+        // the live compositor immediately.
+        if let Some(rendered) = self.rendered_preview_clip(f64::from(self.preview_time())) {
+            return Some((rendered, session.settings()));
         }
         // The echo when there is one: a picture being dragged on the stage
         // is drawn where the pointer has it, not where the document last
@@ -8174,6 +8189,8 @@ impl Studio {
                 self.recents = projects::recents(&self.host.dirs.config);
                 self.host.monitor.clear();
                 self.audition = None;
+                self.timeline_render = None;
+                self.timeline_render_job = None;
                 self.revision += 1;
                 self.flat = None;
                 self.sync_audio();
@@ -8268,6 +8285,10 @@ impl Studio {
         match concat_host::projects::clear_cache(&path) {
             Ok(count) => self.notify(&format!("Cleared {count} cache files"), false),
             Err(error) => self.notify(&format!("Cache clear failed: {error}"), true),
+        }
+        self.timeline_render = None;
+        if self.timeline_render_job.take().is_some() {
+            self.host.exporter.cancel();
         }
         self.request_media_art();
         self.request_preview();
@@ -8364,6 +8385,10 @@ impl Studio {
         ));
         self.host.monitor.clear();
         self.audition = None;
+        self.timeline_render = None;
+        if self.timeline_render_job.take().is_some() {
+            self.host.exporter.cancel();
+        }
         self.revision += 1;
         self.flat = None;
         self.host
@@ -10959,14 +10984,14 @@ impl Studio {
         }
     }
 
-    /// The right-click menu: the bin card's when it was opened on one,
-    /// else the clip's.
+    /// The right-click menu: the bin card's when it was opened on one, the
+    /// clip's when it was opened on a clip, else the timeline's own verbs.
     fn menu(&self) -> Vec<MenuItemData> {
         if let Some(id) = self.menu_media.as_deref() {
             return self.media_menu(id);
         }
         let Some(clip) = self.menu_target.as_ref().and_then(|id| self.clip(id)) else {
-            return Vec::new();
+            return self.timeline_menu();
         };
         let locked = self.locked(&clip.track_id);
         let playhead = f64::from(self.playhead);
@@ -11181,6 +11206,65 @@ impl Studio {
         // closes the gap is the tray's magnetic switch, a setting of the
         // timeline rather than a choice to make at every clip.
         rows
+    }
+
+    /// Empty timeline ground: manual preview rendering, kept flat because
+    /// Concat's context menu deliberately has no nested data model. The group
+    /// label gives the same hierarchy without another popup to chase.
+    fn timeline_menu(&self) -> Vec<MenuItemData> {
+        let action = |id: &str, label: String, enabled: bool| MenuItemData {
+            id: id.into(),
+            label: label.into(),
+            kind: MenuRow::Action,
+            glyph: Glyph::None,
+            shortcut: "".into(),
+            enabled,
+            danger: false,
+            checkable: false,
+            checked: false,
+        };
+        let busy = self.timeline_render_job.is_some();
+        let has_timeline = self.session.is_some() && !self.timeline().clips.is_empty();
+        vec![
+            MenuItemData {
+                label: t("timelinePane.render").to_uppercase().into(),
+                kind: MenuRow::Label,
+                ..Default::default()
+            },
+            action(
+                "render-full",
+                t("timelinePane.renderFull"),
+                has_timeline && !busy,
+            ),
+            action(
+                "render-in",
+                t("timelinePane.renderIn"),
+                has_timeline && !busy && self.playhead > 0.0,
+            ),
+            action(
+                "render-out",
+                t("timelinePane.renderOut"),
+                has_timeline && !busy && self.playhead < self.duration(),
+            ),
+            MenuItemData {
+                kind: MenuRow::Separator,
+                ..Default::default()
+            },
+            action(
+                "render-clear",
+                t("timelinePane.clearRenderCache"),
+                self.timeline_render.is_some() || busy,
+            ),
+        ]
+    }
+
+    /// One of the empty timeline's context-menu verbs.
+    pub fn timeline_action(&mut self, action: &str) {
+        match action {
+            "render-full" | "render-in" | "render-out" => self.render_timeline(action),
+            "render-clear" => self.clear_timeline_render_cache(true),
+            _ => {}
+        }
     }
 
     /// The right-click menu for a card in the bin: the file's verbs, and

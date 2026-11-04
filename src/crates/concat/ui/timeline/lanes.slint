@@ -1422,7 +1422,20 @@ export component Lanes inherits Rectangle {
             property <length> to-y;
 
             pointer-event(event) => {
-                if (event.kind == PointerEventKind.down) {
+                // A right-click on empty timeline ground opens the timeline
+                // menu. The empty id distinguishes it from a clip while
+                // reusing the same menu surface and Rust callback.
+                if (event.button == PointerEventButton.right) {
+                    if (event.kind == PointerEventKind.up) {
+                        menu.request-x = wheel.mouse-x;
+                        menu.request-y = wheel.mouse-y;
+                        root.asked = true;
+                        root.clip-context("");
+                    }
+                    return;
+                }
+                if (event.kind == PointerEventKind.down
+                    && event.button == PointerEventButton.left) {
                     root.floor-pressed();
                     self.additive = event.modifiers.shift;
                     self.from-x = self.mouse-x;

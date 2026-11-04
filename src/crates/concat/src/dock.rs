@@ -254,32 +254,35 @@ pub fn lay_out(node: &Dock, (x, y, w, h): (f32, f32, f32, f32), out: &mut DockLa
     }
 }
 
-/// The arrangement the editor opens with: the inspector a column down the
-/// whole right side, and in the rest the library and the monitor across the
-/// top and the timeline under both of them. The inspector is the tallest
-/// thing in the window - a stack of sections that would otherwise scroll -
-/// and the timeline gives up its right end to it, which is the end with
-/// nothing on it yet. About 0.22 of the width to the inspector and 0.25 to
-/// the library, which is 0.32 of what is left once the inspector has had
-/// its share; the timeline takes the lower 0.4 of the height.
+/// The arrangement the editor opens with: a CapCut-like working triangle,
+/// without making any pane heavier. The monitor owns the whole right column;
+/// the library and inspector share the upper left, and the timeline gets the
+/// full lower-left width. That keeps the picture stable while clips and
+/// properties change, and gives the timeline room for names and waveforms.
+///
+/// About 0.32 of the width goes to the monitor. In the remainder the upper
+/// row is split almost evenly between the library and inspector, and the
+/// timeline takes the lower 0.46 of the height. Every split remains draggable
+/// and every seat remains switchable, so this is a useful default rather than
+/// a locked workspace.
 pub fn default_dock() -> Dock {
     Dock::Split {
         columns: true,
-        ratio: 0.78,
+        ratio: 0.68,
         first: Box::new(Dock::Split {
             columns: false,
-            ratio: 0.6,
+            ratio: 0.54,
             first: Box::new(Dock::Split {
                 columns: true,
-                ratio: 0.32,
+                ratio: 0.48,
                 first: Dock::leaf(PaneKind::Media),
-                second: Dock::leaf(PaneKind::Preview),
+                second: Dock::leaf(PaneKind::Inspector),
             }),
             // The timeline, whose VU meters are a column at its own right
             // edge (see vu-meter.slint) rather than a seat of their own.
             second: Dock::leaf(PaneKind::Timeline),
         }),
-        second: Dock::leaf(PaneKind::Inspector),
+        second: Dock::leaf(PaneKind::Preview),
     }
 }
 
