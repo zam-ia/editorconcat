@@ -321,6 +321,10 @@ impl MediaBin {
 
     /// The cards, as Slint shows them.
     pub fn rows(&self, studio: &Studio) -> Vec<MediaItemData> {
+        // Count once per publish, not once per card: during playback rows are
+        // republished with the rest of the window, and a nested scan would
+        // turn a large bin and a long edit into unnecessary work.
+        let timeline_uses = timeline_uses(studio.timeline());
         self.visible(studio.project())
             .into_iter()
             .map(|item| {
@@ -362,10 +366,24 @@ impl MediaBin {
                     thumbnail: self.thumbs.get(&item.id).cloned().unwrap_or_default(),
                     wave,
                     selected: self.selected.contains(&item.id),
+                    timeline_uses: timeline_uses.get(item.id.as_str()).copied().unwrap_or(0),
                 }
             })
             .collect()
     }
+}
+
+/// How often each imported file occurs in the active timeline. The badge is
+/// intentionally scoped to the timeline on screen: another sequence should
+/// not make a file look added to this one.
+fn timeline_uses(timeline: &model::Timeline) -> HashMap<&str, i32> {
+    let mut uses = HashMap::new();
+    for clip in &timeline.clips {
+        if !clip.media_id.is_empty() {
+            *uses.entry(clip.media_id.as_str()).or_insert(0) += 1;
+        }
+    }
+    uses
 }
 
 /// The document's kind as the card's.
@@ -448,6 +466,29 @@ mod tests {
             4,
             "an unknown sort keeps the order"
         );
+    }
+
+    #[test]
+    fn timeline_use_count_distinguishes_imported_used_and_repeated_media() {
+        let mut project = project();
+        project.active_mut().clips.extend([
+            model::Clip {
+                media_id: "v1".into(),
+                ..Default::default()
+            },
+            model::Clip {
+                media_id: "v1".into(),
+                ..Default::default()
+            },
+            model::Clip {
+                media_id: "a1".into(),
+                ..Default::default()
+            },
+        ]);
+        let uses = timeline_uses(project.active());
+        assert_eq!(uses.get("v1"), Some(&2));
+        assert_eq!(uses.get("a1"), Some(&1));
+        assert_eq!(uses.get("i1"), None, "imported, but not on this timeline");
     }
 
     #[test]

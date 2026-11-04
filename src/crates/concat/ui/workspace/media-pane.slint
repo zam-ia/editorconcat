@@ -75,6 +75,9 @@ export struct MediaItemData {
     /// a file should look like itself wherever it is drawn.
     wave: string,
     selected: bool,
+    /// How many clips in the active timeline use this file. Zero means it
+    /// has only been imported; a positive value draws the "In use" marker.
+    timeline-uses: int,
 }
 
 // ── the page strip ───────────────────────────────────────────────────────────
@@ -568,6 +571,36 @@ export component MediaCard inherits Rectangle {
                 // what kind a card is — footage carries a duration stamp, audio
                 // is a waveform, a still says its format — so a badge would
                 // repeat information the card gives away at a glance.
+
+                // CapCut's "Added" marker, with one useful extra: a repeated
+                // source says how many clips use it. This is document state,
+                // not card state, so it updates after a drop, undo or delete.
+                if root.item.timeline-uses > 0: Rectangle {
+                    x: 4px;
+                    y: 4px;
+                    width: used.width + 20px;
+                    height: 18px;
+                    border-radius: Theme.r-xs;
+                    background: Theme.scrim;
+
+                    Icon {
+                        x: 5px;
+                        y: (parent.height - self.height) / 2;
+                        glyph: Glyph.check;
+                        size: 9px;
+                        tint: Theme.accent;
+                    }
+                    used := Text {
+                        x: 16px;
+                        y: (parent.height - self.height) / 2;
+                        text: root.item.timeline-uses > 1
+                            ? I18n.t("settings.inUse") + " · \{root.item.timeline-uses}"
+                            : I18n.t("settings.inUse");
+                        color: Theme.on-scrim;
+                        font-family: Theme.font-technical;
+                        font-size: Theme.fs-xs;
+                    }
+                }
 
                 // Duration, bottom right, on its own scrim because what is behind
                 // it is a video frame and cannot be relied on for contrast.

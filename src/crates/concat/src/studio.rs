@@ -8971,7 +8971,15 @@ impl Studio {
                     && playhead < clip.start + clip.duration
             })
             .max_by_key(|clip| -self.row_of(&clip.track_id));
-        editor.set_has_picture(showing.is_some());
+        // A source preview owns the monitor even when the timeline playhead is
+        // over an empty gap. Looking only at `showing` hid the decoded source
+        // frame in that very common case, making a media-card click appear to
+        // do nothing. Audio intentionally keeps the picture well empty.
+        let source_has_picture = self
+            .source
+            .as_ref()
+            .is_some_and(|source| source.kind != model::MediaKind::Audio);
+        editor.set_has_picture(source_has_picture || showing.is_some());
         editor.set_preview_clip_name(
             showing
                 .map(|clip| clip.name.as_str())
