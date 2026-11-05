@@ -667,6 +667,34 @@ mod tests {
     }
 
     #[test]
+    fn an_insert_move_reorders_a_lane_and_stops_at_the_next_real_gap() {
+        let (mut editor, media_id, first) = fixture();
+        let video = editor.project().active().tracks[0].id.clone();
+        let later = lane(&mut editor, &media_id, &video, &[10.0, 40.0, 60.0]);
+        let moves = editor
+            .project()
+            .active()
+            .resolve_insert_move(&ClipMove {
+                clip_id: later[2].clone(),
+                start: 0.0,
+                track_id: video,
+            })
+            .expect("the clip can be inserted at the lane head");
+
+        editor
+            .apply(Command::MoveClips { moves })
+            .expect("the insertion arrangement is collision-free");
+        assert_eq!(start_of(&editor, &later[2]), 0.0);
+        assert_eq!(start_of(&editor, &first), 10.0);
+        assert_eq!(start_of(&editor, &later[0]), 20.0);
+        assert_eq!(
+            start_of(&editor, &later[1]),
+            40.0,
+            "the existing ten-second gap absorbs the ripple"
+        );
+    }
+
+    #[test]
     fn a_gap_too_small_for_the_clip_is_passed_over() {
         let (mut editor, media_id, _first) = fixture();
         let video = editor.project().active().tracks[0].id.clone();

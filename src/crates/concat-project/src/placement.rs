@@ -148,6 +148,77 @@ impl Timeline {
         )
     }
 
+    /// A single clip as an insertion rather than a search for an empty gap.
+    ///
+    /// An ordinary move into clear space is left exactly where it was
+    /// dropped. When it covers another clip, the nearer half of that clip
+    /// chooses the insertion edge and only the contiguous clips that no
+    /// longer fit are pushed ahead. A later real gap therefore absorbs the
+    /// ripple instead of moving the rest of the lane. The returned list
+    /// contains the dragged clip and every clip the insertion displaced, so
+    /// a preview and the eventual command can apply the same arrangement.
+    pub fn resolve_insert_move(&self, wanted: &ClipMove) -> Option<Vec<ClipMove>> {
+        let clip = self.clip(&wanted.clip_id)?;
+        let track_id = if self.track(&wanted.track_id).is_some() {
+            wanted.track_id.clone()
+        } else {
+            clip.track_id.clone()
+        };
+        let wanted = ClipMove {
+            clip_id: wanted.clip_id.clone(),
+            start: wanted.start.max(0.0),
+            track_id,
+        };
+        let ignore = [wanted.clip_id.as_str()];
+        if self.is_free(&wanted.track_id, wanted.start, clip.duration, &ignore) {
+            return Some(vec![wanted]);
+        }
+
+        let mut lane: Vec<_> = self
+            .clips
+            .iter()
+            .filter(|other| other.track_id == wanted.track_id && other.id != wanted.clip_id)
+            .collect();
+        lane.sort_by(|a, b| a.start.total_cmp(&b.start));
+        let wanted_end = wanted.start + clip.duration;
+        let struck = lane.iter().copied().find(|other| {
+            covers(
+                wanted.start,
+                wanted_end,
+                other.start,
+                other.start + other.duration,
+            )
+        })?;
+        let midpoint = struck.start + struck.duration / 2.0;
+        let insertion = if wanted.start >= midpoint {
+            struck.start + struck.duration
+        } else {
+            struck.start
+        };
+
+        let mut moves = vec![ClipMove {
+            start: insertion,
+            ..wanted
+        }];
+        let mut cursor = insertion + clip.duration;
+        for other in lane {
+            let other_end = other.start + other.duration;
+            if other_end <= insertion + TOUCH {
+                continue;
+            }
+            if other.start >= cursor - TOUCH {
+                break;
+            }
+            moves.push(ClipMove {
+                clip_id: other.id.clone(),
+                start: cursor,
+                track_id: other.track_id.clone(),
+            });
+            cursor += other.duration;
+        }
+        Some(moves)
+    }
+
     /// The gap a clip sits in on its lane: where the clip before it ends
     /// (zero when there is none) and where the clip after it starts
     /// (infinity when there is none). A trim stays inside it.

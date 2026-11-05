@@ -1137,7 +1137,7 @@ export component PreviewPane inherits Rectangle {
 
         // ── the transport ────────────────────────────────────────────────
         if !root.bare: Rectangle {
-            height: 46px;
+            height: 64px;
             background: Theme.panel;
 
             Rectangle {
@@ -1148,7 +1148,65 @@ export component PreviewPane inherits Rectangle {
                 background: Theme.line;
             }
 
+            // A source can be inspected without playing it from beginning
+            // to end: click anywhere, or drag the thumb, to seek directly.
+            scrub := Rectangle {
+                x: 10px;
+                y: 1px;
+                width: parent.width - 20px;
+                height: 17px;
+                property <float> share: root.duration > 0
+                    ? Math.clamp(root.playhead / root.duration, 0, 1) : 0;
+
+                track := Rectangle {
+                    x: 0;
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: Theme.line-strong;
+
+                    Rectangle {
+                        width: parent.width * scrub.share;
+                        height: parent.height;
+                        border-radius: 2px;
+                        background: Theme.accent;
+                    }
+                }
+
+                Rectangle {
+                    x: Math.max(0px, Math.min(track.width - self.width,
+                        track.width * scrub.share - self.width / 2));
+                    y: (parent.height - self.height) / 2;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 6px;
+                    background: seek-touch.pressed ? Theme.accent-hover : Theme.accent;
+                }
+
+                seek-touch := TouchArea {
+                    enabled: root.duration > 0;
+                    mouse-cursor: ew-resize;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            root.seek(Math.clamp(self.mouse-x / self.width, 0, 1)
+                                * root.duration);
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.seek(Math.clamp(self.mouse-x / self.width, 0, 1)
+                                * root.duration);
+                        }
+                    }
+                }
+            }
+
             HorizontalLayout {
+                x: 0;
+                y: 18px;
+                width: parent.width;
+                height: parent.height - self.y;
                 padding-left: 10px;
                 padding-right: 10px;
                 spacing: 12px;

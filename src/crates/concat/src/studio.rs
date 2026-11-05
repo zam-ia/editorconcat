@@ -4791,11 +4791,16 @@ impl Studio {
                         })
                     })
                     .collect();
-                // The drop's own rule, asked of the timeline as it was before
-                // the drag: the echo shows where the clips will land, in the
-                // nearest gap rather than on top of a clip, or back where
-                // they started when they would cover each other.
-                let landed = self.timeline().resolve_moves(&moves).unwrap_or_else(|| {
+                // One clip dropped onto another is an insertion: the struck
+                // clip and only the neighbours that no longer fit slide
+                // ahead. Groups keep the older nearest-gap rule so their
+                // shape cannot be torn apart by separate lane ripples.
+                let landed = if moves.len() == 1 {
+                    self.timeline().resolve_insert_move(&moves[0])
+                } else {
+                    self.timeline().resolve_moves(&moves)
+                }
+                .unwrap_or_else(|| {
                     origins
                         .iter()
                         .filter_map(|origin| {
@@ -4913,13 +4918,21 @@ impl Studio {
             return;
         };
         match gesture {
-            Gesture::Move { origins, .. } => {
-                let moves: Vec<ClipMove> = origins
+            Gesture::Move { .. } => {
+                // An insertion may have pushed clips that were not selected.
+                // Commit every position the echo changed so the command sees
+                // the same collision-free arrangement the drag preview did.
+                let moves: Vec<ClipMove> = echo
+                    .active()
+                    .clips
                     .iter()
-                    .filter_map(|origin| {
-                        let after = echo.active().clip(&origin.clip)?;
+                    .filter_map(|after| {
+                        let before = self.clip(&after.id)?;
+                        if before.start == after.start && before.track_id == after.track_id {
+                            return None;
+                        }
                         Some(ClipMove {
-                            clip_id: origin.clip.clone(),
+                            clip_id: after.id.clone(),
                             start: after.start,
                             track_id: after.track_id.clone(),
                         })
