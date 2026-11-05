@@ -4922,22 +4922,14 @@ impl Studio {
                 // An insertion may have pushed clips that were not selected.
                 // Commit every position the echo changed so the command sees
                 // the same collision-free arrangement the drag preview did.
-                let moves: Vec<ClipMove> = echo
-                    .active()
-                    .clips
-                    .iter()
-                    .filter_map(|after| {
-                        let before = self.clip(&after.id)?;
-                        if before.start == after.start && before.track_id == after.track_id {
-                            return None;
-                        }
-                        Some(ClipMove {
-                            clip_id: after.id.clone(),
-                            start: after.start,
-                            track_id: after.track_id.clone(),
-                        })
-                    })
-                    .collect();
+                // Compare against the session explicitly: `self.clip()` reads
+                // the echo while it exists and would compare the preview with
+                // itself, discard every move and snap back on release.
+                let moves = self
+                    .session
+                    .as_ref()
+                    .map(|session| changed_moves(session.project().active(), echo.active()))
+                    .unwrap_or_default();
                 self.echo = None;
                 // A press and a release with no drag between them is a
                 // click: nothing moved, and a MoveClips of the clips onto
@@ -12742,6 +12734,27 @@ fn moved_any<'a>(moves: &[ClipMove], before: impl Fn(&str) -> Option<&'a Clip>) 
     })
 }
 
+/// Every clip whose timeline position differs between the real edit and a
+/// gesture echo. A one-clip insertion can move neighbours too, so the drop
+/// commits the whole changed arrangement rather than only the held clip.
+fn changed_moves(before: &Timeline, after: &Timeline) -> Vec<ClipMove> {
+    after
+        .clips
+        .iter()
+        .filter_map(|after| {
+            let before = before.clip(&after.id)?;
+            if before.track_id == after.track_id && before.start as f32 == after.start as f32 {
+                return None;
+            }
+            Some(ClipMove {
+                clip_id: after.id.clone(),
+                start: after.start,
+                track_id: after.track_id.clone(),
+            })
+        })
+        .collect()
+}
+
 /// The clips a flattened edit makes audible, as playback takes them:
 /// through the exporter's own cut into pieces, so a curve or a reverse
 /// sounds in the window as it will in the file.
@@ -12954,6 +12967,34 @@ mod tests {
             track_id: "t".into(),
         }];
         assert!(!super::moved_any(&gone, before));
+    }
+
+    #[test]
+    fn a_drop_commits_positions_from_the_echo_against_the_real_timeline() {
+        use std::sync::Arc;
+
+        use concat_project::Editor;
+        use concat_project::model::{Clip, ClipKind};
+
+        let editor = Editor::new();
+        let mut before = editor.project().active().clone();
+        let track = before.tracks[0].id.clone();
+        before.clips.push(Arc::new(Clip::blank(
+            "last",
+            track.clone(),
+            ClipKind::Video,
+            "last",
+            20.0,
+            10.0,
+        )));
+        let mut after = before.clone();
+        after.clip_mut("last").expect("the echo has the clip").start = 0.0;
+
+        let moves = super::changed_moves(&before, &after);
+        assert_eq!(moves.len(), 1);
+        assert_eq!(moves[0].clip_id, "last");
+        assert_eq!(moves[0].start, 0.0);
+        assert_eq!(moves[0].track_id, track);
     }
 
     /// A wheel is keyed as one knob: named by itself or by any of its own
