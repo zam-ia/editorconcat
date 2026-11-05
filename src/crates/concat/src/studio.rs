@@ -1645,6 +1645,123 @@ fn key_commands(clip_id: &str, before: &Clip, after: &Clip) -> Vec<Command> {
     commands
 }
 
+/// A built-in effect's parameter text as the inspector should show it.
+///
+/// Effect manifests are also the public package format, so their labels stay
+/// as authored and third-party packages are never rewritten. The bundled
+/// catalogue, however, used to leak its English manifest labels into an
+/// otherwise Spanish inspector. Keep that data stable and localise only at
+/// the presentation boundary.
+fn localised_effect_text(text: &str) -> String {
+    if i18n::current() != "es" {
+        return text.to_owned();
+    }
+    spanish_effect_text(text).unwrap_or(text).to_owned()
+}
+
+/// Spanish words used by the bundled effects' inspector controls. Unknown
+/// text is deliberately left alone by `localised_effect_text`: an extension
+/// may already have been written in Spanish, or may use a proper name.
+fn spanish_effect_text(text: &str) -> Option<&str> {
+    Some(match text {
+        // Parameter groups.
+        "Curves" => "Curvas",
+        "Effects" => "Efectos",
+        "Lightness" => "Luminosidad",
+        "Wheels" => "Ruedas",
+
+        // Video and colour controls.
+        "Age" => "Edad",
+        "Amount" => "Cantidad",
+        "Angle" => "Ángulo",
+        "Blacks" => "Negros",
+        "Bleed" => "Sangrado",
+        "Blue" => "Azul",
+        "Blush" => "Rubor",
+        "Brighten" => "Iluminar",
+        "Brightness" => "Brillo",
+        "Centre X" => "Centro X",
+        "Centre Y" => "Centro Y",
+        "Chill" => "Frialdad",
+        "Clarity" => "Claridad",
+        "Colour" => "Color",
+        "Colour filter" => "Filtro de color",
+        "Contrast" => "Contraste",
+        "Cool" => "Frío",
+        "Coolness" => "Frialdad",
+        "Depth" => "Profundidad",
+        "Direction" => "Dirección",
+        "Dot size" => "Tamaño de punto",
+        "Dread" => "Inquietud",
+        "Dust" => "Polvo",
+        "Even" => "Uniformidad",
+        "Exposure" => "Exposición",
+        "Fade" => "Desvanecer",
+        "Flash" => "Destello",
+        "Gain" => "Ganancia",
+        "Glow" => "Resplandor",
+        "Grain" => "Grano",
+        "Green" => "Verde",
+        "Greens" => "Verdes",
+        "Haze" => "Neblina",
+        "Heat" => "Calor",
+        "Highlights" => "Altas luces",
+        "Ink" => "Tinta",
+        "Invert" => "Invertir",
+        "Key colour" => "Color clave",
+        "Length" => "Longitud",
+        "Levels" => "Niveles",
+        "Lift" => "Elevación",
+        "Light leak" => "Fuga de luz",
+        "Lights" => "Luces",
+        "Lines" => "Líneas",
+        "Matte" => "Mate",
+        "Noise" => "Ruido",
+        "Pop" => "Realce",
+        "Protect skin" => "Proteger piel",
+        "Punch" => "Impacto",
+        "Radius" => "Radio",
+        "Red" => "Rojo",
+        "Saturation" => "Saturación",
+        "Shadows" => "Sombras",
+        "Shape" => "Forma",
+        "Sharpen" => "Nitidez",
+        "Shift" => "Desplazamiento",
+        "Similarity" => "Similitud",
+        "Size" => "Tamaño",
+        "Sky" => "Cielo",
+        "Soften" => "Suavizar",
+        "Softness" => "Suavidad",
+        "Speed" => "Velocidad",
+        "Spill" => "Contaminación",
+        "Spread" => "Extensión",
+        "Strength" => "Intensidad",
+        "Target" => "Objetivo",
+        "Temperature" => "Temperatura",
+        "Threshold" => "Umbral",
+        "Tint" => "Matiz",
+        "Tone" => "Tono",
+        "Turns" => "Vueltas",
+        "Twist" => "Torsión",
+        "Vignette" => "Viñeta",
+        "Warmth" => "Calidez",
+        "Water" => "Agua",
+        "Whites" => "Blancos",
+
+        // Audio controls.
+        "Air" => "Aire",
+        "Body" => "Cuerpo",
+        "Decay" => "Decaimiento",
+        "Delay" => "Retardo",
+        "Drive" => "Impulso",
+        "Pitch" => "Tono",
+
+        // Correct in Spanish already, or technical terms shared by both.
+        "Bits" | "Color" | "Gamma" | "Luma" | "Semitones" => text,
+        _ => return None,
+    })
+}
+
 /// The colour panel's rows: the adjust package's parameters, at the values
 /// the clip's chain holds or at the defaults when the clip carries none.
 /// Every one can be keyed; `at` is the playhead's place in the clip, `0..=1`,
@@ -1686,8 +1803,8 @@ fn adjust_rows(chain: &[AppliedFilter], at: Option<f64>) -> Vec<AppliedParamData
             AppliedParamData {
                 entry: -1,
                 key: param.key.as_str().into(),
-                label: param.label.as_str().into(),
-                group: param.group.as_str().into(),
+                label: localised_effect_text(&param.label).into(),
+                group: localised_effect_text(&param.group).into(),
                 unit: param.unit.as_str().into(),
                 min: param.min as f32,
                 max: param.max as f32,
@@ -1744,7 +1861,7 @@ fn chain_colours(chain: &[AppliedFilter]) -> Vec<ColourKnobData> {
                 .map(move |param| ColourKnobData {
                     entry: index as i32,
                     key: param.key.as_str().into(),
-                    label: param.label.as_str().into(),
+                    label: localised_effect_text(&param.label).into(),
                     value: unpacked(
                         entry
                             .params
@@ -1826,7 +1943,7 @@ fn chain_rows(chain: &[AppliedFilter]) -> (Vec<AppliedEntryData>, Vec<AppliedPar
             knobs.push(AppliedParamData {
                 entry: index as i32,
                 key: param.key.as_str().into(),
-                label: param.label.as_str().into(),
+                label: localised_effect_text(&param.label).into(),
                 group: "".into(),
                 unit: param.unit.as_str().into(),
                 min: param.min as f32,
@@ -1889,8 +2006,8 @@ fn grading_rows(
                 wheels.push(WheelData {
                     entry,
                     key: param.key.as_str().into(),
-                    label: param.label.as_str().into(),
-                    group: param.group.as_str().into(),
+                    label: localised_effect_text(&param.label).into(),
+                    group: localised_effect_text(&param.group).into(),
                     x: value(&x, 0.0) as f32,
                     y: value(&y, 0.0) as f32,
                     master: value(&m, param.default) as f32,
@@ -1917,8 +2034,8 @@ fn grading_rows(
                     CurveData {
                         entry,
                         key: param.key.as_str().into(),
-                        label: param.label.as_str().into(),
-                        group: param.group.as_str().into(),
+                        label: localised_effect_text(&param.label).into(),
+                        group: localised_effect_text(&param.group).into(),
                         points: ModelRc::default(),
                         path: grading::curve_path(params, &param.key).into(),
                     },
@@ -12325,7 +12442,7 @@ impl Studio {
         self.notify("Entrada dinámica CRISDAL aplicada.", false);
     }
 
-    /// Applies the compact motion vocabulary behind CapCut's most useful text
+    /// Applies the compact motion vocabulary behind CapCut's most useful clip
     /// animations. These are ordinary project keyframes, not opaque packages:
     /// they preview and export through the same path as hand-authored motion,
     /// remain editable, and add no steady-state memory cost.
@@ -12333,7 +12450,14 @@ impl Studio {
         let Some(clip) = self.clip(id).cloned() else {
             return;
         };
-        if clip.kind != model::ClipKind::Text || self.locked(&clip.track_id) {
+        if !matches!(
+            clip.kind,
+            model::ClipKind::Video
+                | model::ClipKind::Image
+                | model::ClipKind::Text
+                | model::ClipKind::Shape
+        ) || self.locked(&clip.track_id)
+        {
             return;
         }
 
@@ -12353,15 +12477,19 @@ impl Studio {
             }));
         }
         if preset == "text-motion-reset" {
-            for property in model::KeyProperty::MASK {
-                commands.extend(clip.keys_on(property).map(|key| Command::ClearClipKey {
-                    clip_id: id.to_owned(),
-                    property,
-                    at: key.at,
-                }));
+            // The reveal presets animate a text mask. A picture's own mask is
+            // an edit, not animation state, and must survive pressing None.
+            if clip.kind == model::ClipKind::Text {
+                for property in model::KeyProperty::MASK {
+                    commands.extend(clip.keys_on(property).map(|key| Command::ClearClipKey {
+                        clip_id: id.to_owned(),
+                        property,
+                        at: key.at,
+                    }));
+                }
             }
             self.apply(Command::Batch { commands });
-            self.notify("Animación de texto eliminada.", false);
+            self.notify("Animación eliminada.", false);
             return;
         }
 
@@ -12485,6 +12613,9 @@ impl Studio {
                 }
             }
             "text-in-typewriter" | "text-in-one-by-one" => {
+                if clip.kind != model::ClipKind::Text {
+                    return;
+                }
                 for property in model::KeyProperty::MASK {
                     commands.extend(clip.keys_on(property).map(|held| Command::ClearClipKey {
                         clip_id: id.to_owned(),
@@ -12655,7 +12786,7 @@ impl Studio {
         }
 
         self.apply(Command::Batch { commands });
-        self.notify("Animación de texto aplicada.", false);
+        self.notify("Animación aplicada.", false);
     }
 
     /// Every clip on an unlocked lane.
@@ -12801,8 +12932,20 @@ mod tests {
     use super::{
         Command, Footprint, Studio, adjust_key_names, chain_colours, chain_rows, custom_frame,
         custom_rate, fps_of, grading_rows, home_folder, key_commands, packed, place_in, shown,
-        wheel_partners, write_keyable,
+        spanish_effect_text, wheel_partners, write_keyable,
     };
+
+    #[test]
+    fn bundled_effect_controls_have_spanish_inspector_words() {
+        assert_eq!(spanish_effect_text("Shadows"), Some("Sombras"));
+        assert_eq!(spanish_effect_text("Whites"), Some("Blancos"));
+        assert_eq!(spanish_effect_text("Blacks"), Some("Negros"));
+        assert_eq!(spanish_effect_text("Effects"), Some("Efectos"));
+        assert_eq!(spanish_effect_text("Sharpen"), Some("Nitidez"));
+        assert_eq!(spanish_effect_text("Fade"), Some("Desvanecer"));
+        assert_eq!(spanish_effect_text("Vignette"), Some("Viñeta"));
+        assert_eq!(spanish_effect_text("Third-party label"), None);
+    }
 
     /// A pasted group keeps its shape from `base` on, its rows shifted
     /// and held inside the lanes it lands in, a locked row passed over

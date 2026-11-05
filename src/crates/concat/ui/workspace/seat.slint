@@ -297,6 +297,7 @@ export component Seat inherits Rectangle {
             clip-set(field, value) => { Editor.clip-set(field, value); }
             clip-set-text(field, value) => { Editor.clip-set-text(field, value); }
             clip-set-colour(field, value) => { Editor.clip-set-colour(field, value); }
+            clip-action(action) => { Editor.clip-action(action); }
             clip-commit => { Editor.clip-commit(); }
             font-families: Editor.font-families;
             import-font => { Editor.import-font(); }

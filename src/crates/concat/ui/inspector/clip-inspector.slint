@@ -47,9 +47,10 @@ import {
     SelectedTransitionData,
 } from "../timeline/model.slint";
 
-// The editor's clip inspector: one panel, three tabs. Adjust is direct
-// controls; Effects and Audio are each a PresetStack over their chain. A
-// filter is a layer on the lanes and gets FilterPanel, not a chain.
+// The editor's clip inspector follows the familiar consumer-editor strip:
+// Video, Audio, Speed, Animation, Adjust and Styles. Adjust is direct
+// controls; Styles and Audio each expose their effect chain. A filter is a
+// layer on the lanes and gets FilterPanel, not a chain.
 
 /// One parameter a preset exposes. `value` doubles as the default in the
 /// catalogue: applying a preset copies the row, and double-click restores
@@ -1016,6 +1017,9 @@ export component BackgroundRows inherits VerticalLayout {
 /// its background is keyed out.
 export component VideoPanel inherits VerticalLayout {
     in property <SelectedClipData> selected;
+    /// CapCut-like page inside Video: 0 Basic, 1 Remove background, 2 Mask.
+    /// Retouch is the separate EnhancePanel, selected by ConfigPane.
+    in property <int> page;
     /// The picture's chain and its knobs, for the cutout section: keying is
     /// a package on the chain like any effect, and this panel only gives
     /// it a switch and a name.
@@ -1161,7 +1165,7 @@ export component VideoPanel inherits VerticalLayout {
     init => { root.seed(); }
     changed selected => { root.seed(); }
 
-    Section {
+    if root.page == 0: Section {
         first: true;
         transform := SectionHeader {
             title: I18n.t("clipInspector.transform");
@@ -1283,7 +1287,7 @@ export component VideoPanel inherits VerticalLayout {
     // What fills the frame where this picture does not reach: the
     // timeline's background, or one of the clip's own. Only on the lowest
     // picture lane, which is where a background is drawn.
-    if root.canvas && Backdrop.clip-has: Section {
+    if root.page == 0 && root.canvas && Backdrop.clip-has: Section {
         canvas := SectionHeader {
             title: I18n.t("phone.canvas");
             collapsible: true;
@@ -1306,7 +1310,7 @@ export component VideoPanel inherits VerticalLayout {
         }
     }
 
-    Section {
+    if root.page == 0: Section {
         blend := SectionHeader {
             title: I18n.t("clipInspector.blend");
             collapsible: true;
@@ -1356,7 +1360,7 @@ export component VideoPanel inherits VerticalLayout {
     // The camera's shake taken out: the media's movement is measured once
     // in the background, and the correction is worked out from it live, so
     // the sliders answer at once. Footage only.
-    if root.selected.kind == ClipKind.video: Section {
+    if root.page == 0 && root.selected.kind == ClipKind.video: Section {
         stabilize := SectionHeader {
             title: I18n.t("clipInspector.stabilize");
             collapsible: true;
@@ -1429,7 +1433,7 @@ export component VideoPanel inherits VerticalLayout {
     // monitor over it - and chroma key drops a colour. A key is the chroma
     // package on the chain, which is why its knobs read from the chain's
     // own rows. One at a time: ticking a block unticks the others.
-    if !root.figure: Section {
+    if root.page == 1 && !root.figure: Section {
         cutout := SectionHeader {
             title: I18n.t("clipInspector.removeBackground");
             collapsible: true;
@@ -1643,7 +1647,7 @@ export component VideoPanel inherits VerticalLayout {
     // the numbers below place, size, turn and soften it, each keyable.
     // Drawn on the picture as it is seen, so it moves with the clip; the
     // monitor shows its outline with grips to drag while this is open.
-    if root.mask-section
+    if root.page == 2 && root.mask-section
         && (root.selected.kind == ClipKind.video || root.selected.kind == ClipKind.image): Section {
         mask-header := SectionHeader {
             title: I18n.t("mask.title");
@@ -1817,7 +1821,7 @@ export component VideoPanel inherits VerticalLayout {
 
     // What is cut off the source before it is fitted. Fractions of the
     // source's own edges, so a crop survives a change of output size.
-    if !root.figure: Section {
+    if root.page == 0 && !root.figure: Section {
         crop := SectionHeader {
             title: I18n.t("clipInspector.crop");
             collapsible: true;
@@ -2361,6 +2365,239 @@ export component SpeedPanel inherits VerticalLayout {
                 fmt: ParamFormat.rate;
                 unit: "x";
                 changed(v) => { root.set(ClipField.speed, v); root.commit(); }
+            }
+        }
+    }
+}
+
+/// Animation: the common entrance, exit and loop motions people reach for in
+/// CapCut, implemented as ordinary editable keyframes. Applying one does not
+/// add a renderer, background service or package to the project.
+export component AnimationPanel inherits VerticalLayout {
+    /// Text exposes the letter-reveal presets as well as the shared motions.
+    in property <bool> text;
+    callback apply(preset: string);
+
+    property <int> page;
+    property <[string]> pages: I18n.lang == "es"
+        ? ["Entrada", "Salida", "Bucle"]
+        : ["Entrance", "Exit", "Loop"];
+
+    VerticalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 8px;
+        padding-bottom: 4px;
+        SegmentedControl {
+            options: root.pages;
+            current <=> root.page;
+        }
+    }
+
+    if root.page == 0: Section {
+        first: true;
+        SectionHeader {
+            title: I18n.lang == "es" ? "Animación de entrada" : "Entrance animation";
+        }
+        SectionBody {
+            Button {
+                label: I18n.t("common.none");
+                block: true;
+                clicked => { root.apply("text-motion-reset"); }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Desvanecer" : "Fade";
+                    block: true;
+                    clicked => { root.apply("text-in-fade"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Deslizar arriba" : "Slide up";
+                    block: true;
+                    clicked => { root.apply("text-in-slide-up"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Desde la izquierda" : "From left";
+                    block: true;
+                    clicked => { root.apply("text-in-slide-left"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Desde la derecha" : "From right";
+                    block: true;
+                    clicked => { root.apply("text-in-slide-right"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Zoom suave" : "Soft zoom";
+                    block: true;
+                    clicked => { root.apply("text-in-zoom"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Rebote / Pop" : "Bounce / Pop";
+                    block: true;
+                    clicked => { root.apply("text-in-pop"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Giro" : "Spin";
+                    block: true;
+                    clicked => { root.apply("text-in-spin"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Difuso" : "Diffuse";
+                    block: true;
+                    clicked => { root.apply("text-in-blur"); }
+                }
+            }
+            if root.text: HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Rastro del cursor" : "Typewriter";
+                    block: true;
+                    clicked => { root.apply("text-in-typewriter"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Uno por uno" : "One by one";
+                    block: true;
+                    clicked => { root.apply("text-in-one-by-one"); }
+                }
+            }
+            if root.text: Button {
+                label: I18n.lang == "es" ? "Letras binarias" : "Binary letters";
+                block: true;
+                clicked => { root.apply("text-in-binary"); }
+            }
+            if !root.text: Button {
+                label: I18n.lang == "es" ? "Entrada dinámica CRISDAL" : "CRISDAL dynamic entrance";
+                block: true;
+                clicked => { root.apply("crisdal-camera-push"); }
+            }
+        }
+    }
+
+    if root.page == 1: Section {
+        first: true;
+        SectionHeader {
+            title: I18n.lang == "es" ? "Animación de salida" : "Exit animation";
+        }
+        SectionBody {
+            Button {
+                label: I18n.t("common.none");
+                block: true;
+                clicked => { root.apply("text-motion-reset"); }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Desaparición" : "Fade out";
+                    block: true;
+                    clicked => { root.apply("text-out-fade"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Salir arriba" : "Exit up";
+                    block: true;
+                    clicked => { root.apply("text-out-slide-up"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Salir izquierda" : "Exit left";
+                    block: true;
+                    clicked => { root.apply("text-out-slide-left"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Salir derecha" : "Exit right";
+                    block: true;
+                    clicked => { root.apply("text-out-slide-right"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Reducir" : "Shrink";
+                    block: true;
+                    clicked => { root.apply("text-out-shrink"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Giro de salida" : "Spin out";
+                    block: true;
+                    clicked => { root.apply("text-out-spin"); }
+                }
+            }
+        }
+    }
+
+    if root.page == 2: Section {
+        first: true;
+        SectionHeader {
+            title: I18n.lang == "es" ? "Animación en bucle" : "Loop animation";
+        }
+        SectionBody {
+            Button {
+                label: I18n.t("common.none");
+                block: true;
+                clicked => { root.apply("text-motion-reset"); }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Pulso" : "Pulse";
+                    block: true;
+                    clicked => { root.apply("text-loop-pulse"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Flotar" : "Float";
+                    block: true;
+                    clicked => { root.apply("text-loop-float"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Rebote" : "Bounce";
+                    block: true;
+                    clicked => { root.apply("text-loop-bounce"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Sacudida" : "Shake";
+                    block: true;
+                    clicked => { root.apply("text-loop-shake"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Balanceo" : "Swing";
+                    block: true;
+                    clicked => { root.apply("text-loop-swing"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Respirar" : "Breathe";
+                    block: true;
+                    clicked => { root.apply("text-loop-breathe"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: I18n.lang == "es" ? "Parpadeo" : "Blink";
+                    block: true;
+                    clicked => { root.apply("text-loop-blink"); }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Giro continuo" : "Continuous spin";
+                    block: true;
+                    clicked => { root.apply("text-loop-spin"); }
+                }
             }
         }
     }

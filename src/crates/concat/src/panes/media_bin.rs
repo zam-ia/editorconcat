@@ -471,20 +471,23 @@ mod tests {
     #[test]
     fn timeline_use_count_distinguishes_imported_used_and_repeated_media() {
         let mut project = project();
-        project.active_mut().clips.extend([
-            model::Clip {
-                media_id: "v1".into(),
-                ..Default::default()
-            },
-            model::Clip {
-                media_id: "v1".into(),
-                ..Default::default()
-            },
-            model::Clip {
-                media_id: "a1".into(),
-                ..Default::default()
-            },
-        ]);
+        project.active_mut().clips.extend(
+            [
+                model::Clip {
+                    media_id: "v1".into(),
+                    ..Default::default()
+                },
+                model::Clip {
+                    media_id: "v1".into(),
+                    ..Default::default()
+                },
+                model::Clip {
+                    media_id: "a1".into(),
+                    ..Default::default()
+                },
+            ]
+            .map(std::sync::Arc::new),
+        );
         let uses = timeline_uses(project.active());
         assert_eq!(uses.get("v1"), Some(&2));
         assert_eq!(uses.get("a1"), Some(&1));

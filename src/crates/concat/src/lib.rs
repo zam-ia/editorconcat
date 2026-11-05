@@ -1252,6 +1252,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             state.clip_set_colour(field, value);
         }
     ));
+    editor.on_clip_action(on_window!(|state, action: SharedString| {
+        if let Some(id) = state.sole_selection() {
+            state.clip_action(&id, action.as_str());
+        }
+    }));
     // Lanes only: the commit is held and lands with a full publish of its
     // own once the control's moves pause; see `Studio::clip_commit`.
     editor.on_clip_commit(on_lanes!(|state| {

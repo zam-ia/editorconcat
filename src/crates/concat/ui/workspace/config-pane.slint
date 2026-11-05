@@ -8,9 +8,9 @@ import { Pane, PaneBody, PaneScroll } from "pane.slint";
 import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
 import { EffectData } from "../demo/effects-panel.slint";
 import {
-    AdjustPanel, AppliedEntryData, AppliedParamData, AudioPanel, BackgroundRows, ProcessorRows,
-    CatalogueEntryData, ColourKnobData, EnhancePanel, FilterPanel, PresetStack, SpeedPanel,
-    TransitionPanel, VideoPanel,
+    AdjustPanel, AnimationPanel, AppliedEntryData, AppliedParamData, AudioPanel, BackgroundRows,
+    ProcessorRows, CatalogueEntryData, ColourKnobData, EnhancePanel, FilterPanel, PresetStack,
+    SpeedPanel, TransitionPanel, VideoPanel,
 } from "../inspector/clip-inspector.slint";
 import {
     CurveData, CurveGroupData, WheelData, WheelGroupData,
@@ -187,6 +187,8 @@ export component ConfigPane inherits Rectangle {
     callback clip-set(field: ClipField, value: float);
     callback clip-set-text(field: ClipTextField, value: string);
     callback clip-set-colour(field: ClipTextField, value: color);
+    /// Apply one of the selected clip's existing native motion actions.
+    callback clip-action(action: string);
     callback clip-commit();
     /// The Text tab's font picker and its import button; see Editor.
     in property <[string]> font-families;
@@ -213,15 +215,9 @@ export component ConfigPane inherits Rectangle {
     callback transition-duration-set(seconds: float);
 
 
-    // The tab strip follows the selection, and stays short: three tabs at
-    // most, each with a dropdown of its sections, because seven tabs on a
-    // strip this narrow cannot be read. Video holds what happens to the
-    // picture - its placement, its speed, its colour; Audio
-    // the level, the fades and the voice and room chain; Effects the two
-    // shelves and the picture's chain. A still loses Audio, a sound clip
-    // keeps Audio alone, and a title gets Text alone: its look is its
-    // typography, stroke and box, all on the Text tab, and Video or Audio
-    // on a title would be panels that can only say "nothing here".
+    // The strip mirrors CapCut's mental model: each job gets its own stable
+    // destination instead of hiding Speed and Adjust inside Video. The
+    // controls are still Concat's lightweight native ones.
     property <bool> is-text: root.selected.kind == ClipKind.text;
     property <bool> is-image: root.selected.kind == ClipKind.image;
     /// A shape gets one tab, Vector Image, with the placement panel
@@ -235,20 +231,23 @@ export component ConfigPane inherits Rectangle {
     /// panel it grades everything beneath it with, and its chain - are the
     /// tab's sections, so an adjustment layer is graded the way a clip is.
     property <bool> is-layer: root.selected.kind == ClipKind.filter;
-    property <[string]> tabs: root.selected.batch-volume ? ["Audio"] : root.is-text ? ["Text"]
+    property <[string]> tabs: root.selected.batch-volume ? ["Audio"] : root.is-text ? ["Text", "Animation"]
         : root.is-layer ? ["Filter"]
-        : root.is-shape ? ["Video"]
-        : root.is-image ? ["Video", "Effects"]
-        : root.is-audio ? ["Audio"]
-        : ["Video", "Audio", "Effects"];
+        : root.is-shape ? ["Video", "Animation"]
+        : root.is-image ? ["Video", "Animation", "Adjust", "Stylize"]
+        : root.is-audio ? ["Audio", "Speed"]
+        : ["Video", "Audio", "Speed", "Animation", "Adjust", "Stylize"];
     /// The same tabs in the interface's language. `tabs` stays English,
     /// because the panels are picked by comparing against it.
-    property <[string]> tabs-shown: root.selected.batch-volume ? [I18n.t("common.audio")] : root.is-text ? [I18n.t("common.text")]
+    property <string> animation-label: I18n.lang == "es" ? "Animación" : "Animation";
+    property <string> stylize-label: I18n.lang == "es" ? "Estilizado" : I18n.t("mediaPane.styles");
+    property <[string]> tabs-shown: root.selected.batch-volume ? [I18n.t("common.audio")] : root.is-text ? [I18n.t("common.text"), root.animation-label]
         : root.is-layer ? [I18n.t("configPane.filter")]
-        : root.is-shape ? [I18n.t("configPane.vectorImage")]
-        : root.is-image ? [I18n.t("common.video"), I18n.t("common.effects")]
-        : root.is-audio ? [I18n.t("common.audio")]
-        : [I18n.t("common.video"), I18n.t("common.audio"), I18n.t("common.effects")];
+        : root.is-shape ? [I18n.t("configPane.vectorImage"), root.animation-label]
+        : root.is-image ? [I18n.t("common.video"), root.animation-label, I18n.t("common.adjust"), root.stylize-label]
+        : root.is-audio ? [I18n.t("common.audio"), I18n.t("common.speed")]
+        : [I18n.t("common.video"), I18n.t("common.audio"), I18n.t("common.speed"),
+            root.animation-label, I18n.t("common.adjust"), root.stylize-label];
     /// A one-segment segmented control is a label wearing a costume, so a lone
     /// tab renders as the panel's plain heading instead.
     property <bool> single: root.tabs.length < 2;
@@ -276,7 +275,7 @@ export component ConfigPane inherits Rectangle {
 
     /// The sections of the current tab, as the dropdown lists them.
     property <[string]> sections: root.heading == "Video"
-            ? (root.is-shape ? ["Basic"] : ["Basic", "Enhance", "Adjust"])
+            ? (root.is-shape ? ["Basic"] : ["Basic", "Cutout", "Mask", "Retouch"])
         // Audio's chain library is a page of its own, beside the level,
         // fades and treatments rather than under them, the way Video's
         // Adjust sits beside its Basic. Named apart from Video's "Basic"
@@ -284,17 +283,24 @@ export component ConfigPane inherits Rectangle {
         // by this name alone.
         : root.heading == "Audio"
             ? (root.selected.batch-volume ? ["Sound"] : ["Sound", "AudioEffects"])
-        : root.heading == "Effects" ? ["Effects"]
+        : root.heading == "Speed" ? ["Speed"]
+        : root.heading == "Animation" ? ["Animation"]
+        : root.heading == "Adjust" ? ["Adjust"]
+        : root.heading == "Stylize" ? ["Effects"]
         : root.heading == "Text" ? ["Text"]
         : ["Layer", "Adjust", "Effects"];
     /// The sections as the dropdown shows them; see `tabs-shown`.
     property <[string]> sections-shown: root.heading == "Video"
             ? (root.is-shape ? [I18n.t("configPane.basic")]
-                : [I18n.t("configPane.basic"), I18n.t("common.enhance"), I18n.t("common.adjust")])
+                : [I18n.t("configPane.basic"), I18n.t("clipInspector.removeBackground"),
+                    I18n.t("mask.title"), I18n.lang == "es" ? "Retoque" : "Retouch"])
         : root.heading == "Audio"
             ? (root.selected.batch-volume ? [I18n.t("configPane.basic")]
                 : [I18n.t("configPane.basic"), I18n.t("configPane.audioEffects")])
-        : root.heading == "Effects" ? [I18n.t("common.effects")]
+        : root.heading == "Speed" ? [I18n.t("common.speed")]
+        : root.heading == "Animation" ? [root.animation-label]
+        : root.heading == "Adjust" ? [I18n.t("common.adjust")]
+        : root.heading == "Stylize" ? [root.stylize-label]
         : root.heading == "Text" ? [I18n.t("common.text")]
         : [I18n.t("common.layer"), I18n.t("common.adjust"), I18n.t("common.effects")];
 
@@ -303,19 +309,16 @@ export component ConfigPane inherits Rectangle {
     // for the same reason `tab` is.
     property <int> section-video;
     property <int> section-audio;
-    property <int> section-effects;
     property <int> section-text;
     property <int> section-layer;
     property <int> section: root.heading == "Video" ? root.section-video
         : root.heading == "Audio" ? root.section-audio
-        : root.heading == "Effects" ? root.section-effects
         : root.heading == "Text" ? root.section-text
         : root.heading == "Filter" ? root.section-layer
         : 0;
     function pick-section(index: int) {
         if (root.heading == "Video") { root.section-video = index; }
         else if (root.heading == "Audio") { root.section-audio = index; }
-        else if (root.heading == "Effects") { root.section-effects = index; }
         else if (root.heading == "Text") { root.section-text = index; }
         else if (root.heading == "Filter") { root.section-layer = index; }
     }
@@ -338,13 +341,15 @@ export component ConfigPane inherits Rectangle {
                 : root.jump-section == "Effects" ? 2 : 0;
             return;
         }
+        if (root.jump-section == "Adjust") {
+            root.tab = root.is-image ? 2 : 4;
+            return;
+        }
         if (root.jump-tab == "Video") { root.tab = 0; }
         else if (root.jump-tab == "Audio") { root.tab = root.is-audio ? 0 : 1; }
         else if (root.jump-tab == "Effects") { root.tab = root.tabs.length - 1; }
-        // Enhance sits second in the Video tab for a video and a still
-        // alike, and Audio effects second in the Audio tab.
-        root.pick-section(root.jump-section == "Enhance" || root.jump-section == "AudioEffects"
-            ? 1 : 0);
+        if (root.jump-section == "Enhance") { root.section-video = 3; }
+        else if (root.jump-section == "AudioEffects") { root.section-audio = 1; }
     }
     changed jump-token => { root.jump(); }
     init => { root.jump(); }
@@ -632,10 +637,9 @@ export component ConfigPane inherits Rectangle {
             padding: 0px;
 
             PaneScroll {
-                // Basic, with the clip's speed under it: one knob is not a
-                // page of its own.
-                if root.showing == "Basic": VerticalLayout {
+                if root.showing == "Basic" || root.showing == "Cutout" || root.showing == "Mask": VerticalLayout {
                     VideoPanel {
+                        page: root.showing == "Cutout" ? 1 : root.showing == "Mask" ? 2 : 0;
                         selected: root.selected;
                         applied: root.applied-visual;
                         params: root.visual-params;
@@ -661,21 +665,26 @@ export component ConfigPane inherits Rectangle {
                         cutout-clear => { root.cutout-clear(); }
                     }
 
-                    if !root.is-image && !root.is-shape: SpeedPanel {
-                        first: false;
-                        selected: root.selected;
-                        set(field, value) => { root.clip-set(field, value); }
-                        commit => { root.clip-commit(); }
-                    }
                 }
 
-                if root.showing == "Enhance": EnhancePanel {
+                if root.showing == "Retouch": EnhancePanel {
                     selected: root.selected;
                     enhance-set(on) => { root.clip-enhance-set(on); }
                     enhance-size(index) => { root.clip-enhance-size(index); }
                     enhance-strength(strength) => { root.clip-enhance-strength(strength); }
                     enhance-preview => { root.clip-enhance-preview(); }
                     enhance-run => { root.clip-enhance-run(); }
+                }
+
+                if root.showing == "Speed": SpeedPanel {
+                    selected: root.selected;
+                    set(field, value) => { root.clip-set(field, value); }
+                    commit => { root.clip-commit(); }
+                }
+
+                if root.showing == "Animation": AnimationPanel {
+                    text: root.is-text;
+                    apply(preset) => { root.clip-action(preset); }
                 }
 
                 if root.showing == "Adjust": AdjustPanel {
@@ -711,15 +720,6 @@ export component ConfigPane inherits Rectangle {
                     AudioPanel {
                         selected: root.selected;
                         audio-tracks: root.audio-tracks;
-                        set(field, value) => { root.clip-set(field, value); }
-                        commit => { root.clip-commit(); }
-                    }
-                    // A sound clip's speed, under its level and fades: one
-                    // knob is not a page of its own. A picture's sound
-                    // rides the picture's, set under Video › Basic.
-                    if root.is-audio && !root.selected.batch-volume: SpeedPanel {
-                        first: false;
-                        selected: root.selected;
                         set(field, value) => { root.clip-set(field, value); }
                         commit => { root.clip-commit(); }
                     }
