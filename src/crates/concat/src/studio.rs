@@ -12173,6 +12173,14 @@ impl Studio {
         let Some(clip) = self.clip(id).cloned() else {
             return;
         };
+        // Animation cards append their duration (`preset@seconds`) without
+        // widening the editor's generic action callback. Old projects,
+        // menus and shortcuts still send the bare action and keep 0.5 s.
+        let (action, motion_seconds) = action
+            .split_once('@')
+            .map_or((action, 0.5), |(name, seconds)| {
+                (name, seconds.parse::<f64>().unwrap_or(0.5).clamp(0.1, 3.0))
+            });
         match action {
             "crisdal-text-white" => self.apply_crisdal_text_preset(id, "crisdal.manifiesto-blanco"),
             "crisdal-text-gold" => self.apply_crisdal_text_preset(id, "crisdal.enfasis-dorado"),
@@ -12180,7 +12188,9 @@ impl Studio {
                 self.apply_crisdal_text_preset(id, "crisdal.editorial-blanco")
             }
             "crisdal-camera-push" => self.apply_crisdal_camera_push(id),
-            motion if motion.starts_with("text-") => self.apply_text_motion_preset(id, motion),
+            motion if motion.starts_with("text-") => {
+                self.apply_text_motion_preset(id, motion, motion_seconds)
+            }
             "copy" => self.copy_clips(Some(id)),
             "duplicate" => self.duplicate_selected(),
             // Pasted after the clip that was right-clicked, on its lane.
@@ -12446,7 +12456,7 @@ impl Studio {
     /// animations. These are ordinary project keyframes, not opaque packages:
     /// they preview and export through the same path as hand-authored motion,
     /// remain editable, and add no steady-state memory cost.
-    fn apply_text_motion_preset(&mut self, id: &str, preset: &str) {
+    fn apply_text_motion_preset(&mut self, id: &str, preset: &str, duration: f64) {
         let Some(clip) = self.clip(id).cloned() else {
             return;
         };
@@ -12494,7 +12504,7 @@ impl Studio {
         }
 
         let seconds = clip.duration.max(f64::from(MIN_DURATION));
-        let edge = (0.5 / seconds).clamp(0.01, 0.45);
+        let edge = (duration / seconds).clamp(0.01, 0.45);
         let out = 1.0 - edge;
         let soft = model::KeyEase([0.22, 1.0, 0.36, 1.0]).sane();
         let smooth = model::KeyEase([0.4, 0.0, 0.2, 1.0]).sane();
@@ -12529,19 +12539,19 @@ impl Studio {
         match preset {
             "text-in-fade" => two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft),
             "text-in-slide-up" => {
-                two!(model::KeyProperty::OffsetY, 0.0, y + 0.12, edge, y, soft);
+                two!(model::KeyProperty::OffsetY, 0.0, y + 0.07, edge, y, soft);
                 two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft);
             }
             "text-in-slide-down" => {
-                two!(model::KeyProperty::OffsetY, 0.0, y - 0.12, edge, y, soft);
+                two!(model::KeyProperty::OffsetY, 0.0, y - 0.07, edge, y, soft);
                 two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft);
             }
             "text-in-slide-left" => {
-                two!(model::KeyProperty::OffsetX, 0.0, x - 0.35, edge, x, soft);
+                two!(model::KeyProperty::OffsetX, 0.0, x - 0.20, edge, x, soft);
                 two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft);
             }
             "text-in-slide-right" => {
-                two!(model::KeyProperty::OffsetX, 0.0, x + 0.35, edge, x, soft);
+                two!(model::KeyProperty::OffsetX, 0.0, x + 0.20, edge, x, soft);
                 two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, soft);
             }
             "text-in-zoom" => {
@@ -12649,19 +12659,19 @@ impl Studio {
                 two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth)
             }
             "text-out-slide-up" => {
-                two!(model::KeyProperty::OffsetY, out, y, 1.0, y - 0.12, smooth);
+                two!(model::KeyProperty::OffsetY, out, y, 1.0, y - 0.07, smooth);
                 two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
             }
             "text-out-slide-down" => {
-                two!(model::KeyProperty::OffsetY, out, y, 1.0, y + 0.12, smooth);
+                two!(model::KeyProperty::OffsetY, out, y, 1.0, y + 0.07, smooth);
                 two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
             }
             "text-out-slide-left" => {
-                two!(model::KeyProperty::OffsetX, out, x, 1.0, x - 0.35, smooth);
+                two!(model::KeyProperty::OffsetX, out, x, 1.0, x - 0.20, smooth);
                 two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
             }
             "text-out-slide-right" => {
-                two!(model::KeyProperty::OffsetX, out, x, 1.0, x + 0.35, smooth);
+                two!(model::KeyProperty::OffsetX, out, x, 1.0, x + 0.20, smooth);
                 two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
             }
             "text-out-shrink" => {

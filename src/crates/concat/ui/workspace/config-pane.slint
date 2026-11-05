@@ -684,7 +684,7 @@ export component ConfigPane inherits Rectangle {
 
                 if root.showing == "Animation": AnimationPanel {
                     text: root.is-text;
-                    apply(preset) => { root.clip-action(preset); }
+                    apply(preset, duration) => { root.clip-action(preset + "@\{duration}"); }
                 }
 
                 if root.showing == "Adjust": AdjustPanel {

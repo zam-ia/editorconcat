@@ -273,10 +273,27 @@ impl Titles {
                     flip_v: clip.flip_v,
                     blend: clip.blend.clone(),
                     effects: clip.video_effects.clone(),
-                    scale: clip.scale,
-                    offset_x: clip.offset_x,
-                    offset_y: clip.offset_y,
-                    rotation: clip.rotation,
+                    // A keyed property travels absolutely. Keep its engine
+                    // base neutral, exactly as footage does in `flatten`;
+                    // otherwise a title at Y=.30 with a Y=.30 destination
+                    // lands at .60 and every animation appears to move the
+                    // title away from where it was placed.
+                    scale: concat_export::flatten::export_base(
+                        clip,
+                        concat_project::model::KeyProperty::Scale,
+                    ),
+                    offset_x: concat_export::flatten::export_base(
+                        clip,
+                        concat_project::model::KeyProperty::OffsetX,
+                    ),
+                    offset_y: concat_export::flatten::export_base(
+                        clip,
+                        concat_project::model::KeyProperty::OffsetY,
+                    ),
+                    rotation: concat_export::flatten::export_base(
+                        clip,
+                        concat_project::model::KeyProperty::Rotation,
+                    ),
                     // A title is never pulled along an axis: its box is
                     // sized by the style, and its glyphs keep their shape.
                     // 0.2.2's side grips wrote a stretch onto title clips
@@ -296,8 +313,16 @@ impl Titles {
                     // The style's own opacity multiplies the clip's: a
                     // half-transparent title fades to half, not to solid.
                     opacity: match painting {
-                        Painting::Title(text) => (clip.opacity * text.opacity).clamp(0.0, 1.0),
-                        Painting::Shape(_) => clip.opacity.clamp(0.0, 1.0),
+                        Painting::Title(text) => (concat_export::flatten::export_base(
+                            clip,
+                            concat_project::model::KeyProperty::Opacity,
+                        ) * text.opacity)
+                            .clamp(0.0, 1.0),
+                        Painting::Shape(_) => concat_export::flatten::export_base(
+                            clip,
+                            concat_project::model::KeyProperty::Opacity,
+                        )
+                        .clamp(0.0, 1.0),
                     },
                     media_width: Some(width),
                     media_height: Some(height),
@@ -751,6 +776,41 @@ mod tests {
             left[0].clip.reveal_map.as_ref().map(|r| &*r.gray)
         );
         let _ = std::fs::remove_dir_all(dirs.data.parent().unwrap());
+    }
+
+    /// Title animation keys are absolute, like footage keys. The still sent
+    /// to the compositor therefore carries a neutral base on every keyed
+    /// property: the final key is the position the editor shows, not that
+    /// position added to the title's pre-animation position a second time.
+    #[test]
+    fn keyed_title_transform_does_not_double_its_base() {
+        let dirs = scratch("title_animation_base");
+        let mut editor = Editor::new();
+        let id = editor
+            .apply(Command::AddTextClip {
+                above: false,
+                track_id: None,
+                start: 0.0,
+                style: None,
+                duration: Some(3.0),
+                offset_y: Some(0.30),
+            })
+            .expect("a title is added")
+            .created_id
+            .expect("with an id");
+        editor
+            .apply(Command::SetClipKey {
+                clip_id: id,
+                property: concat_project::model::KeyProperty::OffsetY,
+                at: 1.0,
+                value: 0.30,
+                ease: concat_project::model::KeyEase::LINEAR,
+            })
+            .expect("the destination key is set");
+
+        let out = Titles::new(&dirs).clips(editor.project(), 640, 360);
+        assert_eq!(out[0].clip.offset_y, 0.0, "the keyed base is neutral");
+        assert_eq!(out[0].clip.animation[0].value, 0.30);
     }
 
     /// More titles than the byte budget holds are all kept while the

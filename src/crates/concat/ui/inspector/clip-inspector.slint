@@ -2370,18 +2370,91 @@ export component SpeedPanel inherits VerticalLayout {
     }
 }
 
+// A light preview card: no thumbnails, decoders or background jobs. Hovering
+// animates the sample in the same direction as the preset; clicking applies
+// it. The grid feels like CapCut's gallery without adding idle memory cost.
+component AnimationCard inherits Rectangle {
+    in property <string> label;
+    /// 0 none, 1 fade, 2 vertical, 3 left, 4 right, 5 zoom/pop,
+    /// 6 spin/diffuse, 7 letters.
+    in property <int> motion;
+    in property <bool> exit;
+    callback clicked();
+
+    horizontal-stretch: 1;
+    height: 82px;
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: touch.has-hover ? Theme.accent : Theme.line;
+    background: touch.has-hover ? Theme.field-hover : Theme.field;
+
+    property <bool> displaced: root.exit ? touch.has-hover : !touch.has-hover;
+
+    Rectangle {
+        x: 6px;
+        y: 6px;
+        width: parent.width - 12px;
+        height: 48px;
+        border-radius: Theme.r;
+        background: Theme.panel;
+        clip: true;
+
+        sample := Text {
+            x: 6px + (root.displaced && root.motion == 3 ? -18px
+                : root.displaced && root.motion == 4 ? 18px : 0px);
+            y: (parent.height - self.height) / 2
+                + (root.displaced && root.motion == 2 ? (root.exit ? -14px : 14px) : 0px);
+            width: parent.width - 12px;
+            text: root.motion == 0 ? "—" : root.motion == 7 ? "ABC" : "Aa";
+            color: Theme.fg;
+            font-size: root.motion == 5 && root.displaced ? 14px : 20px;
+            font-weight: Theme.weight-title;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            opacity: root.displaced && (root.motion == 1 || root.motion == 6) ? 0.18 : 1;
+            animate x, y, opacity, font-size {
+                duration: 420ms;
+                easing: cubic-bezier(0.22, 1, 0.36, 1);
+            }
+        }
+    }
+
+    Text {
+        x: 6px;
+        y: 58px;
+        width: parent.width - 12px;
+        height: 18px;
+        text: root.label;
+        color: Theme.fg;
+        font-size: Theme.fs-sm;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 /// Animation: the common entrance, exit and loop motions people reach for in
 /// CapCut, implemented as ordinary editable keyframes. Applying one does not
 /// add a renderer, background service or package to the project.
 export component AnimationPanel inherits VerticalLayout {
     /// Text exposes the letter-reveal presets as well as the shared motions.
     in property <bool> text;
-    callback apply(preset: string);
+    callback apply(preset: string, duration: float);
 
     property <int> page;
+    property <float> duration: 0.5;
     property <[string]> pages: I18n.lang == "es"
         ? ["Entrada", "Salida", "Bucle"]
         : ["Entrance", "Exit", "Loop"];
+
+    function run(preset: string) {
+        root.apply(preset, root.duration);
+    }
 
     VerticalLayout {
         padding-left: 8px;
@@ -2400,85 +2473,85 @@ export component AnimationPanel inherits VerticalLayout {
             title: I18n.lang == "es" ? "Animación de entrada" : "Entrance animation";
         }
         SectionBody {
-            Button {
+            AnimationCard {
                 label: I18n.t("common.none");
-                block: true;
-                clicked => { root.apply("text-motion-reset"); }
+                motion: 0;
+                clicked => { root.run("text-motion-reset"); }
             }
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Desvanecer" : "Fade";
-                    block: true;
-                    clicked => { root.apply("text-in-fade"); }
+                    motion: 1;
+                    clicked => { root.run("text-in-fade"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Deslizar arriba" : "Slide up";
-                    block: true;
-                    clicked => { root.apply("text-in-slide-up"); }
+                    motion: 2;
+                    clicked => { root.run("text-in-slide-up"); }
                 }
             }
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Desde la izquierda" : "From left";
-                    block: true;
-                    clicked => { root.apply("text-in-slide-left"); }
+                    motion: 3;
+                    clicked => { root.run("text-in-slide-left"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Desde la derecha" : "From right";
-                    block: true;
-                    clicked => { root.apply("text-in-slide-right"); }
+                    motion: 4;
+                    clicked => { root.run("text-in-slide-right"); }
                 }
             }
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Zoom suave" : "Soft zoom";
-                    block: true;
-                    clicked => { root.apply("text-in-zoom"); }
+                    motion: 5;
+                    clicked => { root.run("text-in-zoom"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Rebote / Pop" : "Bounce / Pop";
-                    block: true;
-                    clicked => { root.apply("text-in-pop"); }
+                    motion: 5;
+                    clicked => { root.run("text-in-pop"); }
                 }
             }
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Giro" : "Spin";
-                    block: true;
-                    clicked => { root.apply("text-in-spin"); }
+                    motion: 6;
+                    clicked => { root.run("text-in-spin"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Difuso" : "Diffuse";
-                    block: true;
-                    clicked => { root.apply("text-in-blur"); }
+                    motion: 6;
+                    clicked => { root.run("text-in-blur"); }
                 }
             }
             if root.text: HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Rastro del cursor" : "Typewriter";
-                    block: true;
-                    clicked => { root.apply("text-in-typewriter"); }
+                    motion: 7;
+                    clicked => { root.run("text-in-typewriter"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Uno por uno" : "One by one";
-                    block: true;
-                    clicked => { root.apply("text-in-one-by-one"); }
+                    motion: 7;
+                    clicked => { root.run("text-in-one-by-one"); }
                 }
             }
-            if root.text: Button {
+            if root.text: AnimationCard {
                 label: I18n.lang == "es" ? "Letras binarias" : "Binary letters";
-                block: true;
-                clicked => { root.apply("text-in-binary"); }
+                motion: 7;
+                clicked => { root.run("text-in-binary"); }
             }
-            if !root.text: Button {
+            if !root.text: AnimationCard {
                 label: I18n.lang == "es" ? "Entrada dinámica CRISDAL" : "CRISDAL dynamic entrance";
-                block: true;
-                clicked => { root.apply("crisdal-camera-push"); }
+                motion: 5;
+                clicked => { root.run("crisdal-camera-push"); }
             }
         }
     }
@@ -2489,48 +2562,55 @@ export component AnimationPanel inherits VerticalLayout {
             title: I18n.lang == "es" ? "Animación de salida" : "Exit animation";
         }
         SectionBody {
-            Button {
+            AnimationCard {
                 label: I18n.t("common.none");
-                block: true;
-                clicked => { root.apply("text-motion-reset"); }
+                motion: 0;
+                exit: true;
+                clicked => { root.run("text-motion-reset"); }
             }
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Desaparición" : "Fade out";
-                    block: true;
-                    clicked => { root.apply("text-out-fade"); }
+                    motion: 1;
+                    exit: true;
+                    clicked => { root.run("text-out-fade"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Salir arriba" : "Exit up";
-                    block: true;
-                    clicked => { root.apply("text-out-slide-up"); }
+                    motion: 2;
+                    exit: true;
+                    clicked => { root.run("text-out-slide-up"); }
                 }
             }
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Salir izquierda" : "Exit left";
-                    block: true;
-                    clicked => { root.apply("text-out-slide-left"); }
+                    motion: 3;
+                    exit: true;
+                    clicked => { root.run("text-out-slide-left"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Salir derecha" : "Exit right";
-                    block: true;
-                    clicked => { root.apply("text-out-slide-right"); }
+                    motion: 4;
+                    exit: true;
+                    clicked => { root.run("text-out-slide-right"); }
                 }
             }
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Reducir" : "Shrink";
-                    block: true;
-                    clicked => { root.apply("text-out-shrink"); }
+                    motion: 5;
+                    exit: true;
+                    clicked => { root.run("text-out-shrink"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Giro de salida" : "Spin out";
-                    block: true;
-                    clicked => { root.apply("text-out-spin"); }
+                    motion: 6;
+                    exit: true;
+                    clicked => { root.run("text-out-spin"); }
                 }
             }
         }
@@ -2542,62 +2622,87 @@ export component AnimationPanel inherits VerticalLayout {
             title: I18n.lang == "es" ? "Animación en bucle" : "Loop animation";
         }
         SectionBody {
-            Button {
+            AnimationCard {
                 label: I18n.t("common.none");
-                block: true;
-                clicked => { root.apply("text-motion-reset"); }
+                motion: 0;
+                clicked => { root.run("text-motion-reset"); }
             }
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Pulso" : "Pulse";
-                    block: true;
-                    clicked => { root.apply("text-loop-pulse"); }
+                    motion: 5;
+                    clicked => { root.run("text-loop-pulse"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Flotar" : "Float";
-                    block: true;
-                    clicked => { root.apply("text-loop-float"); }
+                    motion: 2;
+                    clicked => { root.run("text-loop-float"); }
                 }
             }
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Rebote" : "Bounce";
-                    block: true;
-                    clicked => { root.apply("text-loop-bounce"); }
+                    motion: 2;
+                    clicked => { root.run("text-loop-bounce"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Sacudida" : "Shake";
-                    block: true;
-                    clicked => { root.apply("text-loop-shake"); }
+                    motion: 3;
+                    clicked => { root.run("text-loop-shake"); }
                 }
             }
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Balanceo" : "Swing";
-                    block: true;
-                    clicked => { root.apply("text-loop-swing"); }
+                    motion: 6;
+                    clicked => { root.run("text-loop-swing"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Respirar" : "Breathe";
-                    block: true;
-                    clicked => { root.apply("text-loop-breathe"); }
+                    motion: 1;
+                    clicked => { root.run("text-loop-breathe"); }
                 }
             }
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Parpadeo" : "Blink";
-                    block: true;
-                    clicked => { root.apply("text-loop-blink"); }
+                    motion: 1;
+                    clicked => { root.run("text-loop-blink"); }
                 }
-                Button {
+                AnimationCard {
                     label: I18n.lang == "es" ? "Giro continuo" : "Continuous spin";
-                    block: true;
-                    clicked => { root.apply("text-loop-spin"); }
+                    motion: 6;
+                    clicked => { root.run("text-loop-spin"); }
                 }
+            }
+        }
+    }
+
+    // The timing control stays below the preset grid, where CapCut keeps
+    // it. Choose a value, then click a preset to apply that exact duration.
+    if root.page != 2: Section {
+        SectionHeader {
+            title: I18n.lang == "es" ? "Duración" : "Duration";
+        }
+        SectionBody {
+            Param {
+                label: I18n.lang == "es" ? "Duración" : "Duration";
+                value <=> root.duration;
+                minimum: 0.1;
+                maximum: 3;
+                step: 0.1;
+                default-value: 0.5;
+                fmt: ParamFormat.rate;
+                unit: "s";
+            }
+            Note {
+                text: I18n.lang == "es"
+                    ? "Elige la duración y pulsa la animación. La posición final se conserva."
+                    : "Choose a duration, then click the animation. The final position stays fixed.";
             }
         }
     }
