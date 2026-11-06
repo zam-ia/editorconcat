@@ -1,0 +1,22 @@
+format = 2
+
+[effect]
+id = "concat.burn-through"
+name = "Quemado de pelicula"
+kind = "transition"
+category = "Motion Graphics"
+order = 5
+description = "Una quemadura calida abre el siguiente plano con borde luminoso."
+
+[[param]]
+key = "heat"
+label = "Calor"
+min = 0
+max = 100
+default = 65
+step = 1
+unit = "%"
+
+[transition]
+entry = "effect.wgsl"
+fallback = "fadeblack"

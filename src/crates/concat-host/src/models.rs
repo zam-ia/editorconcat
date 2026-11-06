@@ -54,6 +54,17 @@ pub const SOUNDS_REPO: &str = "concatapp/assets";
 /// repository does not take a sound off the shelf.
 pub const SOUNDS_RELEASE: &str = "audio-v1";
 
+/// The pinned SFX Kit revision used by the built-in, CC0 sound catalogue.
+/// Pinning it keeps every manifest digest meaningful even when upstream's
+/// `main` branch changes later.
+pub const SFX_KIT_COMMIT: &str = "92780e7ab0cdfb557497a988089c47f46e8c7412";
+
+/// A file in the pinned SFX Kit revision. `path` is validated by the sound
+/// catalogue before it reaches this function.
+pub fn sfx_kit_source(path: &str) -> String {
+    format!("https://raw.githubusercontent.com/wyzowl/sfx-kit/{SFX_KIT_COMMIT}/{path}")
+}
+
 /// Where to try for a sound's file, in order: the release, then the
 /// repository. The bytes are checked against the manifest's digest
 /// whichever answers.

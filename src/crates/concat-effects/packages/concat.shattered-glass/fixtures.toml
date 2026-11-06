@@ -1,0 +1,22 @@
+[[probe]]
+name = "default"
+input = [0, 0, 0, 1]
+to = [0, 0, 0, 1]
+progress = 0
+expect = [0, 0, 0, 1]
+
+[[probe]]
+name = "minimum"
+at = "min"
+input = [0, 0, 0, 1]
+to = [0, 0, 0, 1]
+progress = 0
+expect = [0, 0, 0, 1]
+
+[[probe]]
+name = "maximum"
+at = "max"
+input = [0, 0, 0, 1]
+to = [0, 0, 0, 1]
+progress = 0
+expect = [0, 0, 0, 1]

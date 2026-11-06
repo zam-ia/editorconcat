@@ -2530,6 +2530,32 @@ export component AnimationPanel inherits VerticalLayout {
                     clicked => { root.run("text-in-blur"); }
                 }
             }
+            HorizontalLayout {
+                spacing: 6px;
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Elástico" : "Elastic";
+                    motion: 5;
+                    clicked => { root.run("text-in-elastic"); }
+                }
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Sello" : "Stamp";
+                    motion: 5;
+                    clicked => { root.run("text-in-stamp"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Caída" : "Drop";
+                    motion: 2;
+                    clicked => { root.run("text-in-drop"); }
+                }
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Destello" : "Flicker";
+                    motion: 1;
+                    clicked => { root.run("text-in-flicker"); }
+                }
+            }
             if root.text: HorizontalLayout {
                 spacing: 6px;
                 AnimationCard {
@@ -2613,6 +2639,36 @@ export component AnimationPanel inherits VerticalLayout {
                     clicked => { root.run("text-out-spin"); }
                 }
             }
+            HorizontalLayout {
+                spacing: 6px;
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Caer" : "Drop out";
+                    motion: 2;
+                    exit: true;
+                    clicked => { root.run("text-out-drop"); }
+                }
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Parpadeo" : "Flicker out";
+                    motion: 1;
+                    exit: true;
+                    clicked => { root.run("text-out-flicker"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Zoom de salida" : "Zoom out";
+                    motion: 5;
+                    exit: true;
+                    clicked => { root.run("text-out-zoom"); }
+                }
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Barrido" : "Wipe out";
+                    motion: 4;
+                    exit: true;
+                    clicked => { root.run("text-out-wipe"); }
+                }
+            }
         }
     }
 
@@ -2677,6 +2733,32 @@ export component AnimationPanel inherits VerticalLayout {
                     label: I18n.lang == "es" ? "Giro continuo" : "Continuous spin";
                     motion: 6;
                     clicked => { root.run("text-loop-spin"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Glitch" : "Glitch";
+                    motion: 3;
+                    clicked => { root.run("text-loop-glitch"); }
+                }
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Latido" : "Heartbeat";
+                    motion: 5;
+                    clicked => { root.run("text-loop-heartbeat"); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Tambaleo" : "Wobble";
+                    motion: 6;
+                    clicked => { root.run("text-loop-wobble"); }
+                }
+                AnimationCard {
+                    label: I18n.lang == "es" ? "Neón" : "Neon flicker";
+                    motion: 1;
+                    clicked => { root.run("text-loop-neon"); }
                 }
             }
         }

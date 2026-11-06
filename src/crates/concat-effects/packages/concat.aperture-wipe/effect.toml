@@ -1,0 +1,21 @@
+format = 2
+
+[effect]
+id = "concat.aperture-wipe"
+name = "Apertura cinematografica"
+kind = "transition"
+category = "Motion Graphics"
+order = 1
+description = "Un iris poligonal abre el siguiente plano desde el centro."
+
+[[param]]
+key = "blades"
+label = "Hojas"
+min = 3
+max = 12
+default = 7
+step = 1
+
+[transition]
+entry = "effect.wgsl"
+fallback = "circle-open"

@@ -309,6 +309,10 @@ pub struct Listed {
     pub category: String,
     /// The file's name in the repository's `audio/` folder.
     pub file: String,
+    /// A safe relative path in the pinned SFX Kit repository. Empty for the
+    /// older Concat asset catalogue, whose files are flat.
+    #[serde(default)]
+    pub path: String,
     /// Seconds.
     #[serde(default)]
     pub duration: f64,
@@ -327,6 +331,19 @@ pub struct Listed {
     /// Lowercase hex: what the download must match.
     #[serde(default)]
     pub sha256: String,
+    /// Searchable editorial metadata carried by SFX Kit. Older catalogues
+    /// simply leave these empty.
+    #[serde(default)]
+    pub description: String,
+    /// Short discovery words such as `whoosh`, `transition` and `soft`.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// The point in the file that should meet the visual action.
+    #[serde(default, rename = "syncAt")]
+    pub sync_at: f64,
+    /// Suggested gain while voice-over is present.
+    #[serde(default, rename = "underVoiceoverDb")]
+    pub under_voiceover_db: f64,
 }
 
 impl Listed {
@@ -340,10 +357,27 @@ impl Listed {
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
             && is_plain_name(&self.file)
+            && (self.path.is_empty() || is_safe_relative_path(&self.path))
             && self.sha256.len() == 64
             && self.sha256.chars().all(|c| c.is_ascii_hexdigit())
             && (license == "CC0" || license == "CC0-1.0")
     }
+}
+
+fn is_safe_relative_path(path: &str) -> bool {
+    let path = Path::new(path);
+    !path.is_absolute()
+        && path
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
+        && path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                EXTENSIONS
+                    .iter()
+                    .any(|known| known.eq_ignore_ascii_case(extension))
+            })
 }
 
 impl Catalogue {
@@ -372,8 +406,18 @@ pub fn cache_dir(dirs: &AppDirs) -> PathBuf {
 
 /// The manifest as last fetched, when it has been.
 pub fn cached_catalogue(dirs: &AppDirs) -> Option<Catalogue> {
-    let bytes = std::fs::read(cache_dir(dirs).join("manifest.json")).ok()?;
-    Catalogue::parse(&bytes).ok()
+    std::fs::read(cache_dir(dirs).join("manifest.json"))
+        .ok()
+        .and_then(|bytes| Catalogue::parse(&bytes).ok())
+        .or_else(builtin_catalogue)
+}
+
+/// The 320-file SFX Kit catalogue ships as metadata only. Audio remains
+/// outside the executable and is downloaded, checked and cached on first
+/// preview/use, so adding the library costs no startup RAM and almost no
+/// installation size.
+fn builtin_catalogue() -> Option<Catalogue> {
+    Catalogue::parse(include_bytes!("../assets/sfx-kit-manifest.json")).ok()
 }
 
 /// Fetches the manifest, and keeps it for the sessions after. `Ok(None)`
@@ -381,6 +425,16 @@ pub fn cached_catalogue(dirs: &AppDirs) -> Option<Catalogue> {
 /// published - which the shelf says as "coming soon" rather than as an
 /// error.
 pub fn fetch_catalogue(dirs: &AppDirs) -> Result<Option<Catalogue>, String> {
+    if let Some(catalogue) = builtin_catalogue() {
+        let dir = cache_dir(dirs);
+        if std::fs::create_dir_all(&dir).is_ok() {
+            let _ = std::fs::write(
+                dir.join("manifest.json"),
+                include_bytes!("../assets/sfx-kit-manifest.json"),
+            );
+        }
+        return Ok(Some(catalogue));
+    }
     use std::io::Read;
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(15))
@@ -429,7 +483,12 @@ pub fn fetch_sound(
         .map_err(|error| format!("could not create {}: {error}", dir.display()))?;
     let partial = target.with_extension("partial");
     let mut last = String::new();
-    for url in crate::models::sound_sources(&sound.file) {
+    let mut sources = Vec::new();
+    if !sound.path.is_empty() && is_safe_relative_path(&sound.path) {
+        sources.push(crate::models::sfx_kit_source(&sound.path));
+    }
+    sources.extend(crate::models::sound_sources(&sound.file));
+    for url in sources {
         match crate::models::download(&url, &partial, sound.bytes, cancel, "cancelled", progress) {
             Ok(_) => match crate::models::verify(&partial, &sound.sha256) {
                 Ok(()) => {

@@ -1,0 +1,22 @@
+format = 2
+
+[effect]
+id = "concat.bounce-cut"
+name = "Corte con rebote"
+kind = "transition"
+category = "Motion Graphics"
+order = 2
+description = "El plano entrante cae, rebota y ocupa el encuadre."
+
+[[param]]
+key = "bounce"
+label = "Rebote"
+min = 0
+max = 100
+default = 55
+step = 1
+unit = "%"
+
+[transition]
+entry = "effect.wgsl"
+fallback = "slideup"

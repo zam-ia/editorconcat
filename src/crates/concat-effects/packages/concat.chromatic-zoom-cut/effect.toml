@@ -1,0 +1,22 @@
+format = 2
+
+[effect]
+id = "concat.chromatic-zoom-cut"
+name = "Zoom cromatico"
+kind = "transition"
+category = "Motion Graphics"
+order = 4
+description = "Zoom rapido con separacion RGB para cortes musicales y reels."
+
+[[param]]
+key = "fringe"
+label = "Aberracion"
+min = 0
+max = 100
+default = 48
+step = 1
+unit = "%"
+
+[transition]
+entry = "effect.wgsl"
+fallback = "zoomin"

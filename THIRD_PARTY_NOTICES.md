@@ -1,5 +1,37 @@
 # Third-party notices
 
+## SFX Kit
+
+Concat includes the catalogue metadata for SFX Kit by Wyzowl and downloads
+individual sounds only when the user previews or adds them. The 320 audio
+files and their metadata are dedicated to the public domain under CC0 1.0.
+The pinned upstream revision is `92780e7ab0cdfb557497a988089c47f46e8c7412`.
+The complete CC0 legal text is retained at
+`src/crates/concat-host/assets/SFX-KIT-LICENSE.txt`.
+
+Source: https://github.com/wyzowl/sfx-kit
+
+## GL Transitions reference
+
+The additional Motion Graphics transition set was designed for Concat's WGSL
+package contract after studying the open GL Transitions specification and
+catalogue. No shader source was copied verbatim. GL Transitions is MIT licensed.
+
+Source: https://github.com/gl-transitions/gl-transitions
+
+## Curated color-grading LUTs
+
+The optional installer can place a curated set of color-grading tables in the
+user's external Concat effects directory. Striped Purple's Color Grading LUTs
+are MIT licensed; jonmatifa's Sony a6000 LUTs are dedicated under CC0 1.0.
+Their license files are installed beside the user packages and the LUTs are
+not embedded into the Concat executable.
+
+Sources:
+
+- https://github.com/stripedpurple/color-grading-luts
+- https://github.com/jonmatifa/a6000-LUTs
+
 ## FFmpeg
 
 Concat links FFmpeg's libraries - libavformat, libavcodec, libavfilter,

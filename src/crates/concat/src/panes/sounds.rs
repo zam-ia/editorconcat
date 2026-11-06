@@ -39,7 +39,36 @@ const CONCAT: &str = "concat-";
 
 /// The Concat shelf's categories, as the manifest names them; the sidebar
 /// shows them in the interface's language, after All.
-pub const CATEGORIES: [&str; 5] = ["Whoosh", "Impact", "Riser", "Ambience", "Music"];
+pub const CATEGORIES: &[&str] = &[
+    "Whooshes",
+    "Swishes and zips",
+    "Swipes",
+    "Reverse whooshes",
+    "Risers and fallers",
+    "Bounce, spin and zoom",
+    "Impacts",
+    "Cinematic hits",
+    "Booms and bass",
+    "Pops",
+    "Appear and vanish",
+    "Shape changes",
+    "Interface",
+    "Keyboard",
+    "Writing and drawing",
+    "Phone",
+    "Mechanical",
+    "Foley",
+    "Everyday props",
+    "Notifications",
+    "Tones",
+    "Shimmers",
+    "Logo stings",
+    "Celebration",
+    "Time",
+    "Money",
+    "Digital",
+    "Data",
+];
 
 /// Where the Concat shelf stands.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -374,7 +403,16 @@ impl SoundsPane {
                     name: sound.name.as_str().into(),
                     duration: sound.duration as f32,
                     wave: SharedString::new(),
-                    detail: category_label(&sound.category).into(),
+                    detail: if sound.description.is_empty() {
+                        category_label(&sound.category)
+                    } else {
+                        format!(
+                            "{} · {}",
+                            category_label(&sound.category),
+                            sound.description
+                        )
+                    }
+                    .into(),
                     removable: false,
                     progress,
                 }
@@ -419,6 +457,40 @@ impl SoundsPane {
 /// A category as the interface says it: one of the five in its language,
 /// or the manifest's own word.
 pub fn category_label(category: &str) -> String {
+    if crate::i18n::current() == "es" {
+        return match category.to_ascii_lowercase().as_str() {
+            "whooshes" => "Whooshes",
+            "swishes and zips" => "Barridos y zips",
+            "swipes" => "Deslizamientos",
+            "reverse whooshes" => "Whooshes inversos",
+            "risers and fallers" => "Risers y caidas",
+            "bounce, spin and zoom" => "Rebote, giro y zoom",
+            "impacts" => "Impactos",
+            "cinematic hits" => "Golpes cinematograficos",
+            "booms and bass" => "Booms y bajos",
+            "pops" => "Pops",
+            "appear and vanish" => "Aparecer y desaparecer",
+            "shape changes" => "Cambios de forma",
+            "interface" => "Interfaz",
+            "keyboard" => "Teclado",
+            "writing and drawing" => "Escritura y dibujo",
+            "phone" => "Telefono",
+            "mechanical" => "Mecanicos",
+            "foley" => "Foley",
+            "everyday props" => "Objetos cotidianos",
+            "notifications" => "Notificaciones",
+            "tones" => "Tonos",
+            "shimmers" => "Destellos",
+            "logo stings" => "Stings de logo",
+            "celebration" => "Celebracion",
+            "time" => "Tiempo",
+            "money" => "Dinero",
+            "digital" => "Digital",
+            "data" => "Datos",
+            _ => category,
+        }
+        .to_owned();
+    }
     match category.to_ascii_lowercase().as_str() {
         "whoosh" => t("sounds.catWhoosh"),
         "impact" => t("sounds.catImpact"),

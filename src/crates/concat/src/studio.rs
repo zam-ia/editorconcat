@@ -12610,6 +12610,63 @@ impl Studio {
                 );
                 two!(model::KeyProperty::Opacity, 0.0, 0.0, edge, opacity, smooth);
             }
+            "text-in-elastic" => {
+                key!(model::KeyProperty::Scale, 0.0, scale * 0.2, linear);
+                key!(model::KeyProperty::Scale, edge * 0.52, scale * 1.18, soft);
+                key!(model::KeyProperty::Scale, edge * 0.72, scale * 0.92, smooth);
+                key!(model::KeyProperty::Scale, edge * 0.88, scale * 1.04, smooth);
+                key!(model::KeyProperty::Scale, edge, scale, smooth);
+                two!(
+                    model::KeyProperty::Opacity,
+                    0.0,
+                    0.0,
+                    edge * 0.32,
+                    opacity,
+                    soft
+                );
+            }
+            "text-in-stamp" => {
+                key!(model::KeyProperty::Scale, 0.0, scale * 1.75, linear);
+                key!(model::KeyProperty::Scale, edge * 0.70, scale * 0.96, soft);
+                key!(model::KeyProperty::Scale, edge, scale, smooth);
+                key!(model::KeyProperty::Rotation, 0.0, rotation - 8.0, linear);
+                key!(model::KeyProperty::Rotation, edge, rotation, soft);
+                two!(
+                    model::KeyProperty::Opacity,
+                    0.0,
+                    0.0,
+                    edge * 0.22,
+                    opacity,
+                    linear
+                );
+            }
+            "text-in-drop" => {
+                key!(model::KeyProperty::OffsetY, 0.0, y - 0.28, linear);
+                key!(model::KeyProperty::OffsetY, edge * 0.65, y + 0.025, soft);
+                key!(model::KeyProperty::OffsetY, edge * 0.82, y - 0.01, smooth);
+                key!(model::KeyProperty::OffsetY, edge, y, smooth);
+                two!(
+                    model::KeyProperty::Opacity,
+                    0.0,
+                    0.0,
+                    edge * 0.25,
+                    opacity,
+                    linear
+                );
+            }
+            "text-in-flicker" => {
+                for (at, value) in [
+                    (0.0, 0.0),
+                    (edge * 0.18, opacity),
+                    (edge * 0.30, opacity * 0.12),
+                    (edge * 0.48, opacity),
+                    (edge * 0.62, opacity * 0.35),
+                    (edge * 0.78, opacity),
+                    (edge, opacity),
+                ] {
+                    key!(model::KeyProperty::Opacity, at, value, linear);
+                }
+            }
             "text-in-binary" => {
                 for (at, dx, a) in [
                     (0.0, -0.08, 0.0),
@@ -12704,6 +12761,41 @@ impl Studio {
                 );
                 two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
             }
+            "text-out-drop" => {
+                two!(model::KeyProperty::OffsetY, out, y, 1.0, y + 0.32, smooth);
+                two!(
+                    model::KeyProperty::Rotation,
+                    out,
+                    rotation,
+                    1.0,
+                    rotation + 7.0,
+                    smooth
+                );
+                two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
+            }
+            "text-out-flicker" => {
+                for (at, value) in [
+                    (out, opacity),
+                    (out + edge * 0.20, opacity * 0.12),
+                    (out + edge * 0.38, opacity),
+                    (out + edge * 0.56, opacity * 0.25),
+                    (out + edge * 0.74, opacity),
+                    (1.0, 0.0),
+                ] {
+                    key!(model::KeyProperty::Opacity, at, value, linear);
+                }
+            }
+            "text-out-zoom" => {
+                two!(
+                    model::KeyProperty::Scale,
+                    out,
+                    scale,
+                    1.0,
+                    scale * 1.85,
+                    smooth
+                );
+                two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
+            }
             "text-out-wipe" => {
                 two!(model::KeyProperty::OffsetX, out, x, 1.0, x + 0.12, smooth);
                 two!(model::KeyProperty::Opacity, out, opacity, 1.0, 0.0, smooth);
@@ -12791,6 +12883,64 @@ impl Studio {
                     rotation + 360.0,
                     linear,
                 );
+            }
+            "text-loop-glitch" => {
+                for (at, dx, a) in [
+                    (0.0, 0.0, opacity),
+                    (0.16, -0.018, opacity),
+                    (0.18, 0.028, opacity * 0.55),
+                    (0.21, 0.0, opacity),
+                    (0.62, 0.0, opacity),
+                    (0.65, 0.022, opacity * 0.45),
+                    (0.68, -0.014, opacity),
+                    (0.72, 0.0, opacity),
+                    (1.0, 0.0, opacity),
+                ] {
+                    key!(model::KeyProperty::OffsetX, at, x + dx, linear);
+                    key!(model::KeyProperty::Opacity, at, a, linear);
+                }
+            }
+            "text-loop-heartbeat" => {
+                for (at, value) in [
+                    (0.0, scale),
+                    (0.18, scale),
+                    (0.25, scale * 1.13),
+                    (0.34, scale),
+                    (0.43, scale * 1.08),
+                    (0.54, scale),
+                    (1.0, scale),
+                ] {
+                    key!(model::KeyProperty::Scale, at, value, soft);
+                }
+            }
+            "text-loop-wobble" => {
+                for (at, angle, size) in [
+                    (0.0, 0.0, 1.0),
+                    (0.20, -4.5, 1.04),
+                    (0.40, 4.0, 0.98),
+                    (0.60, -2.5, 1.025),
+                    (0.80, 1.5, 0.99),
+                    (1.0, 0.0, 1.0),
+                ] {
+                    key!(model::KeyProperty::Rotation, at, rotation + angle, smooth);
+                    key!(model::KeyProperty::Scale, at, scale * size, smooth);
+                }
+            }
+            "text-loop-neon" => {
+                for (at, value) in [
+                    (0.0, opacity),
+                    (0.32, opacity),
+                    (0.34, opacity * 0.35),
+                    (0.37, opacity),
+                    (0.40, opacity * 0.15),
+                    (0.45, opacity),
+                    (0.82, opacity),
+                    (0.84, opacity * 0.52),
+                    (0.87, opacity),
+                    (1.0, opacity),
+                ] {
+                    key!(model::KeyProperty::Opacity, at, value, linear);
+                }
             }
             _ => return,
         }

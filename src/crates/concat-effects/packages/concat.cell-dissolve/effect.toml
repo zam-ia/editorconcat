@@ -1,0 +1,21 @@
+format = 2
+
+[effect]
+id = "concat.cell-dissolve"
+name = "Disolucion en celdas"
+kind = "transition"
+category = "Motion Graphics"
+order = 3
+description = "Mosaicos organicos descubren el plano nuevo con profundidad."
+
+[[param]]
+key = "cells"
+label = "Celdas"
+min = 4
+max = 30
+default = 14
+step = 1
+
+[transition]
+entry = "effect.wgsl"
+fallback = "dissolve"

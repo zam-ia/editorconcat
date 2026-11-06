@@ -1,0 +1,22 @@
+format = 2
+
+[effect]
+id = "concat.card-swipe"
+name = "Tarjeta deslizante"
+kind = "transition"
+category = "Motion Graphics"
+order = 6
+description = "El plano saliente se comporta como una tarjeta que se desliza."
+
+[[param]]
+key = "tilt"
+label = "Inclinacion"
+min = 0
+max = 100
+default = 38
+step = 1
+unit = "%"
+
+[transition]
+entry = "effect.wgsl"
+fallback = "slideright"

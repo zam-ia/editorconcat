@@ -21,6 +21,12 @@ struct Params { threshold: f32, radius: f32, amount: f32, tint: f32 }
 /// How far the taps reach, in sigmas. The Gaussian's width is `params.radius`
 /// as a share of the layer, so a halo reads the same on a phone and a 4K cut.
 const TAU: f32 = 3.14159265;
+// Keep the blur loop statically bounded. D3D11's FXC compiler cannot compile
+// implicit texture gradients inside the old per-pixel variable loop and could
+// take the whole GPU device down while Concat generated effect previews.
+// Thirty-two evenly spaced taps retain a smooth wide halo at a predictable
+// cost on integrated GPUs.
+const BLUR_TAPS: i32 = 32;
 
 fn weight(d: f32, s: f32) -> f32 {
     return exp(-d * d / (2.0 * s * s));
@@ -37,9 +43,9 @@ fn source_at(uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(c.rgb * passed * c.a, c.a);
 }
 
-/// `source_at`'s light weighed along its row about `uv`, two pixels to a
-/// fetch. The screen distance, so the scaling trap either way is caught in
-/// the middle, where `bloom_texel` is the picture's own pixel.
+/// `source_at`'s light weighed along its row about `uv`. The screen distance,
+/// so the scaling trap either way is caught in the middle, where
+/// `bloom_texel` is the picture's own pixel.
 fn across(uv: vec2<f32>) -> vec4<f32> {
     let width = frame.size.x;
     if (width < 1.0) {
@@ -47,20 +53,17 @@ fn across(uv: vec2<f32>) -> vec4<f32> {
     }
     let screen = length((uv - vec2<f32>(0.5)) * vec2<f32>(2.0));
     let sigma = params.radius / 100.0 * screen * frame.size.y / TAU;
-    let centre = uv.x * width;
-    let first = floor(centre - TAU * sigma - 0.5) + 0.5;
-    let pairs = i32(ceil(TAU * sigma)) + 1;
+    if (sigma <= 0.01) {
+        return source_at(uv);
+    }
     var sum = vec4<f32>(0.0);
     var total = 0.0;
-    for (var i = 0; i < pairs; i++) {
-        let a = first + f32(2 * i);
-        let wa = weight(a - centre, sigma);
-        let wb = weight(a + 1.0 - centre, sigma);
-        let w = wa + wb;
-        if (w > 0.0) {
-            sum += source_at(vec2<f32>((a + wb / w) / width, uv.y)) * w;
-            total += w;
-        }
+    for (var i = 0; i < BLUR_TAPS; i++) {
+        let unit = (f32(i) + 0.5) / f32(BLUR_TAPS);
+        let offset = (unit * 2.0 - 1.0) * TAU * sigma;
+        let w = weight(offset, sigma);
+        sum += source_at(vec2<f32>(uv.x + offset / width, uv.y)) * w;
+        total += w;
     }
     if (total <= 0.0) {
         return source_at(uv);
@@ -73,20 +76,17 @@ fn down(uv: vec2<f32>) -> vec4<f32> {
     let rows = 1.0 / across_texel().y;
     let screen = length((uv - vec2<f32>(0.5)) * vec2<f32>(2.0));
     let sigma = params.radius / 100.0 * screen * 2.0;
-    let centre = uv.y * rows;
-    let first = floor(centre - TAU * sigma - 0.5) + 0.5;
-    let pairs = i32(ceil(TAU * sigma)) + 1;
+    if (sigma <= 0.01) {
+        return across_at(uv);
+    }
     var sum = vec4<f32>(0.0);
     var total = 0.0;
-    for (var i = 0; i < pairs; i++) {
-        let a = first + f32(2 * i);
-        let wa = weight(a - centre, sigma);
-        let wb = weight(a + 1.0 - centre, sigma);
-        let w = wa + wb;
-        if (w > 0.0) {
-            sum += across_at(vec2<f32>(uv.x, (a + wb / w) / rows)) * w;
-            total += w;
-        }
+    for (var i = 0; i < BLUR_TAPS; i++) {
+        let unit = (f32(i) + 0.5) / f32(BLUR_TAPS);
+        let offset = (unit * 2.0 - 1.0) * TAU * sigma;
+        let w = weight(offset, sigma);
+        sum += across_at(vec2<f32>(uv.x, uv.y + offset / rows)) * w;
+        total += w;
     }
     if (total <= 0.0) {
         return across_at(uv);
