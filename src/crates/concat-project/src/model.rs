@@ -1381,6 +1381,127 @@ impl ShapeKind {
     }
 }
 
+/// The geometry of a shape's gradient fill.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ShapeGradientKind {
+    /// A band running along `angle`.
+    #[default]
+    Linear,
+    /// Rings expanding from the chosen centre.
+    Radial,
+}
+
+/// One editable colour point in a shape gradient.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ShapeGradientStop {
+    /// Place along the gradient, from its beginning to its end.
+    pub position: f64,
+    /// `#rrggbb[aa]`, so each point can carry its own transparency.
+    pub color: String,
+}
+
+impl Default for ShapeGradientStop {
+    fn default() -> Self {
+        Self {
+            position: 0.0,
+            color: "#ffffff".to_owned(),
+        }
+    }
+}
+
+/// A multi-stop fill for a shape. Coordinates are local to the figure's
+/// own box, so stretching or resizing the shape stretches the fill with it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ShapeGradient {
+    /// Linear band or radial rings.
+    pub kind: ShapeGradientKind,
+    /// Clockwise degrees. Zero runs from left to right.
+    pub angle: f64,
+    /// Radial centre inside the figure, as 0..1 shares of its box.
+    pub center_x: f64,
+    /// Vertical radial centre inside the figure.
+    pub center_y: f64,
+    /// Radial reach as a share of the figure's longer side.
+    pub radius: f64,
+    /// Two to eight colour points, ordered by position.
+    pub stops: Vec<ShapeGradientStop>,
+}
+
+impl ShapeGradient {
+    /// Starts a useful gradient from the solid the shape already wore.
+    pub fn from_fill(fill: &str) -> Self {
+        let first = if fill.trim().is_empty() {
+            "#ffffff"
+        } else {
+            fill
+        };
+        Self {
+            stops: vec![
+                ShapeGradientStop {
+                    position: 0.0,
+                    color: first.to_owned(),
+                },
+                ShapeGradientStop {
+                    position: 1.0,
+                    color: "#7c3aed".to_owned(),
+                },
+            ],
+            ..Self::default()
+        }
+    }
+
+    /// Finite coordinates, a small bounded set, and a stable stop order.
+    pub fn tidy(mut self) -> Self {
+        fn finite(value: f64, fallback: f64) -> f64 {
+            if value.is_finite() { value } else { fallback }
+        }
+        self.angle = finite(self.angle, 0.0).rem_euclid(360.0);
+        self.center_x = finite(self.center_x, 0.5).clamp(0.0, 1.0);
+        self.center_y = finite(self.center_y, 0.5).clamp(0.0, 1.0);
+        self.radius = finite(self.radius, 0.75).clamp(0.05, 2.0);
+        self.stops.truncate(8);
+        for stop in &mut self.stops {
+            stop.position = finite(stop.position, 0.0).clamp(0.0, 1.0);
+            if stop.color.trim().is_empty() {
+                stop.color = "#ffffff".to_owned();
+            }
+        }
+        self.stops.sort_by(|a, b| a.position.total_cmp(&b.position));
+        if self.stops.len() < 2 {
+            self.stops = Self::default().stops;
+        }
+        self
+    }
+}
+
+impl Default for ShapeGradient {
+    fn default() -> Self {
+        Self {
+            kind: ShapeGradientKind::Linear,
+            angle: 0.0,
+            center_x: 0.5,
+            center_y: 0.5,
+            radius: 0.75,
+            stops: vec![
+                ShapeGradientStop {
+                    position: 0.0,
+                    color: "#ffffff".to_owned(),
+                },
+                ShapeGradientStop {
+                    position: 1.0,
+                    color: "#7c3aed".to_owned(),
+                },
+            ],
+        }
+    }
+}
+
 /// How a shape clip is painted. Sizes are fractions of the frame's height,
 /// as a title's are, so a shape composed against 1080p is the same shape at
 /// 4K. A style arriving in a command needs only the fields it changes.
@@ -1395,6 +1516,9 @@ pub struct ShapeStyle {
     pub size: f64,
     /// The inside's colour as `#rrggbb[aa]`; empty for an outline alone.
     pub fill: String,
+    /// A linear or radial multi-stop fill. Absent keeps old projects solid.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gradient: Option<ShapeGradient>,
     /// The outline's colour, drawn when `stroke_width` is above zero. A
     /// line and an arrow are all stroke, drawn in this colour, and fall
     /// back to `fill` when it is empty.
@@ -1421,6 +1545,7 @@ impl ShapeStyle {
         let base = ShapeStyle::default();
         self.size = finite(self.size, base.size).clamp(0.01, 2.0);
         self.stroke_width = finite(self.stroke_width, base.stroke_width).clamp(0.0, 0.5);
+        self.gradient = self.gradient.take().map(ShapeGradient::tidy);
         self
     }
 }
@@ -1433,6 +1558,7 @@ impl Default for ShapeStyle {
             // the frame, small enough to leave the picture around it.
             size: 0.35,
             fill: "#ffffff".to_owned(),
+            gradient: None,
             stroke: String::new(),
             // A line or an arrow is nothing but its stroke, so the default
             // is a visible rule and not zero; a filled figure ignores it

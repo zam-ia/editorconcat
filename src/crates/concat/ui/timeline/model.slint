@@ -190,6 +190,13 @@ export enum ClipField {
     /// and the edge's softness 0..1
     mask-shape, mask-invert,
     mask-x, mask-y, mask-width, mask-height, mask-rotation, mask-roundness, mask-feather,
+    /// shape paint: its own size and outline, fill geometry, number of
+    /// colour stops, and each stop's place along the gradient
+    shape-size, shape-stroke-width, shape-fill-mode,
+    shape-gradient-angle, shape-gradient-center-x, shape-gradient-center-y,
+    shape-gradient-radius, shape-gradient-count,
+    shape-gradient-position-1, shape-gradient-position-2,
+    shape-gradient-position-3, shape-gradient-position-4,
 }
 
 /// One keyable property's state at the playhead, as the inspector needs it.
@@ -318,6 +325,9 @@ export global Backdrop {
 /// The same again for the properties that are text rather than numbers.
 export enum ClipTextField {
     content, font-family, color, stroke-color, background,
+    shape-fill, shape-stroke,
+    shape-gradient-color-1, shape-gradient-color-2,
+    shape-gradient-color-3, shape-gradient-color-4,
 }
 
 /// The selected clip, flattened for the inspector.
@@ -514,6 +524,30 @@ export struct SelectedClipData {
     text-width: float,
     /// the box's height as a fraction of the frame's; zero is the words' own
     text-height: float,
+
+    // the figure's paint, when this is a shape clip. Fill mode is 0 solid,
+    // 1 linear and 2 radial. Four fixed UI slots cover the model's first
+    // four stops; `shape-gradient-count` says how many are active.
+    shape-size: float,
+    shape-fill-mode: int,
+    shape-fill: color,
+    shape-fill-hex: string,
+    shape-stroke: color,
+    shape-stroke-hex: string,
+    shape-stroke-width: float,
+    shape-gradient-angle: float,
+    shape-gradient-center-x: float,
+    shape-gradient-center-y: float,
+    shape-gradient-radius: float,
+    shape-gradient-count: int,
+    shape-gradient-color-1: color,
+    shape-gradient-color-2: color,
+    shape-gradient-color-3: color,
+    shape-gradient-color-4: color,
+    shape-gradient-position-1: float,
+    shape-gradient-position-2: float,
+    shape-gradient-position-3: float,
+    shape-gradient-position-4: float,
 }
 
 /// One picture under the playhead, as the monitor places it.

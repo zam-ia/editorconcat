@@ -35,8 +35,8 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
 use tiny_skia::{
-    Color, FillRule, FilterQuality, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap,
-    PixmapPaint, Rect, Stroke, Transform,
+    Color, FillRule, FilterQuality, GradientStop, LineCap, LineJoin, LinearGradient, Paint, Path,
+    PathBuilder, Pixmap, PixmapPaint, Point, RadialGradient, Rect, SpreadMode, Stroke, Transform,
 };
 use unicode_bidi::ParagraphBidiInfo;
 use unicode_linebreak::BreakOpportunity;
@@ -1661,11 +1661,48 @@ pub struct ShapeStyle {
     pub size: f64,
     /// The inside's colour, `#rrggbb[aa]`; empty for an outline alone.
     pub fill: String,
+    /// A multi-stop fill. Absent paints `fill` as before.
+    pub gradient: Option<ShapeGradient>,
     /// The outline's colour; a line or an arrow is drawn in this, falling
     /// back to `fill` when it is empty.
     pub stroke: String,
     /// The outline's thickness, and a line's or an arrow's own.
     pub stroke_width: f64,
+}
+
+/// Which geometry a shape gradient follows.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShapeGradientKind {
+    /// A straight band at an angle.
+    Linear,
+    /// Rings expanding from a centre.
+    Radial,
+}
+
+/// One colour point along a shape gradient.
+#[derive(Clone, PartialEq, Debug)]
+pub struct ShapeGradientStop {
+    /// Place from the beginning to the end, 0..1.
+    pub position: f64,
+    /// `#rrggbb[aa]` colour at that place.
+    pub color: String,
+}
+
+/// The painter-facing form of a shape gradient.
+#[derive(Clone, PartialEq, Debug)]
+pub struct ShapeGradient {
+    /// Straight band or expanding rings.
+    pub kind: ShapeGradientKind,
+    /// Clockwise degrees for a linear gradient.
+    pub angle: f64,
+    /// Horizontal radial centre inside the figure, 0..1.
+    pub center_x: f64,
+    /// Vertical radial centre inside the figure, 0..1.
+    pub center_y: f64,
+    /// Radial reach as a share of the longer side.
+    pub radius: f64,
+    /// Ordered colour points.
+    pub stops: Vec<ShapeGradientStop>,
 }
 
 /// Paints `style` centred on a `width` × `height` transparent canvas and
@@ -1823,8 +1860,59 @@ fn paint_shape(style: &ShapeStyle, width: u32, height: u32) -> Result<(Pixmap, B
 
     let fill = colour(&style.fill);
     let edge = colour(&style.stroke);
+    let gradient = style.gradient.as_ref().and_then(|gradient| {
+        let stops: Vec<GradientStop> = gradient
+            .stops
+            .iter()
+            .filter_map(|stop| {
+                colour(&stop.color)
+                    .map(|color| GradientStop::new(stop.position.clamp(0.0, 1.0) as f32, color))
+            })
+            .collect();
+        if stops.len() < 2 {
+            return None;
+        }
+        let shader = match gradient.kind {
+            ShapeGradientKind::Linear => {
+                let angle = (gradient.angle as f32).to_radians();
+                let (ux, uy) = (angle.cos(), angle.sin());
+                // The projected half-extent reaches every edge of the
+                // figure, whatever its aspect ratio and the chosen angle.
+                let reach = 0.5 * (w * ux.abs() + h * uy.abs()).max(1.0);
+                LinearGradient::new(
+                    Point::from_xy(cx - ux * reach, cy - uy * reach),
+                    Point::from_xy(cx + ux * reach, cy + uy * reach),
+                    stops,
+                    SpreadMode::Pad,
+                    Transform::identity(),
+                )
+            }
+            ShapeGradientKind::Radial => {
+                let centre = Point::from_xy(
+                    left + w * gradient.center_x.clamp(0.0, 1.0) as f32,
+                    top + h * gradient.center_y.clamp(0.0, 1.0) as f32,
+                );
+                let radius = w.max(h) * gradient.radius.clamp(0.05, 2.0) as f32;
+                RadialGradient::new(
+                    centre,
+                    0.0,
+                    centre,
+                    radius.max(1.0),
+                    stops,
+                    SpreadMode::Pad,
+                    Transform::identity(),
+                )
+            }
+        }?;
+        let mut paint = Paint::default();
+        paint.shader = shader;
+        paint.anti_alias = true;
+        Some(paint)
+    });
     if closed {
-        if let Some(fill) = fill {
+        if let Some(paint) = gradient.as_ref() {
+            canvas.fill_path(&path, paint, FillRule::Winding, Transform::identity(), None);
+        } else if let Some(fill) = fill {
             canvas.fill_path(
                 &path,
                 &stroke(fill),
@@ -1844,6 +1932,16 @@ fn paint_shape(style: &ShapeStyle, width: u32, height: u32) -> Result<(Pixmap, B
                 None,
             );
         }
+    } else if rule > 0.0 && gradient.is_some() {
+        // A line and an arrow are stroke-only figures, but their principal
+        // paint is still the fill, so they can wear a gradient too.
+        canvas.stroke_path(
+            &path,
+            gradient.as_ref().expect("checked above"),
+            &line_style(rule),
+            Transform::identity(),
+            None,
+        );
     } else if rule > 0.0
         && let Some(ink) = edge.or(fill)
     {
@@ -2494,6 +2592,7 @@ mod tests {
             figure: Figure::Square,
             size: 0.5,
             fill: "#ff0000".to_owned(),
+            gradient: None,
             stroke: String::new(),
             stroke_width: 0.0,
         };
@@ -2511,6 +2610,7 @@ mod tests {
             figure: Figure::Line,
             size: 0.5,
             fill: "#00ff00".to_owned(),
+            gradient: None,
             stroke: String::new(),
             stroke_width: 0.05,
         };
@@ -2527,6 +2627,62 @@ mod tests {
 
         let png = render_shape(&square, 64, 64).expect("encodes");
         assert!(png.png.starts_with(b"\x89PNG"));
+    }
+
+    /// Shape fills use their own box for both linear and radial gradients,
+    /// and keep the colour points' alpha in the rendered pixels.
+    #[test]
+    fn shape_gradients_follow_the_figure() {
+        let mut square = ShapeStyle {
+            figure: Figure::Square,
+            size: 0.5,
+            fill: "#000000".to_owned(),
+            gradient: Some(ShapeGradient {
+                kind: ShapeGradientKind::Linear,
+                angle: 0.0,
+                center_x: 0.5,
+                center_y: 0.5,
+                radius: 0.75,
+                stops: vec![
+                    ShapeGradientStop {
+                        position: 0.0,
+                        color: "#ff0000".to_owned(),
+                    },
+                    ShapeGradientStop {
+                        position: 1.0,
+                        color: "#0000ff80".to_owned(),
+                    },
+                ],
+            }),
+            stroke: String::new(),
+            stroke_width: 0.0,
+        };
+        let frame = render_shape_frame(&square, 400, 200).expect("linear paints");
+        let rgba = |x: u32, y: u32| {
+            let at = ((y * 400 + x) * 4) as usize;
+            [
+                frame.rgba[at],
+                frame.rgba[at + 1],
+                frame.rgba[at + 2],
+                frame.rgba[at + 3],
+            ]
+        };
+        let left = rgba(160, 100);
+        let right = rgba(240, 100);
+        assert!(left[0] > left[2], "the linear fill begins red: {left:?}");
+        assert!(right[2] > right[0], "the linear fill ends blue: {right:?}");
+        assert!(right[3] < left[3], "stop transparency is interpolated");
+
+        let gradient = square.gradient.as_mut().expect("gradient");
+        gradient.kind = ShapeGradientKind::Radial;
+        gradient.stops[0].color = "#ffffff".to_owned();
+        gradient.stops[1].color = "#000000".to_owned();
+        let frame = render_shape_frame(&square, 400, 200).expect("radial paints");
+        let at = |x: u32| ((100 * 400 + x) * 4) as usize;
+        assert!(
+            frame.rgba[at(200)] > frame.rgba[at(240)],
+            "the radial centre is brighter than its edge"
+        );
     }
 
     // ── colour emoji: https://github.com/jub0t/Concat/issues/276 ──

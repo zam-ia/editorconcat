@@ -5388,6 +5388,118 @@ impl Studio {
                 ClipField::BackgroundPaddingY => {
                     text.background_padding_y = value.clamp(0.0, 0.5);
                 }
+                ClipField::ShapeSize
+                | ClipField::ShapeStrokeWidth
+                | ClipField::ShapeFillMode
+                | ClipField::ShapeGradientAngle
+                | ClipField::ShapeGradientCenterX
+                | ClipField::ShapeGradientCenterY
+                | ClipField::ShapeGradientRadius
+                | ClipField::ShapeGradientCount
+                | ClipField::ShapeGradientPosition1
+                | ClipField::ShapeGradientPosition2
+                | ClipField::ShapeGradientPosition3
+                | ClipField::ShapeGradientPosition4 => {
+                    if clip.kind == model::ClipKind::Shape {
+                        let shape = clip.shape.get_or_insert_with(model::ShapeStyle::default);
+                        match field {
+                            ClipField::ShapeSize => shape.size = value.clamp(0.01, 2.0),
+                            ClipField::ShapeStrokeWidth => {
+                                shape.stroke_width = value.clamp(0.0, 0.5);
+                            }
+                            ClipField::ShapeFillMode => {
+                                let mode = value.round() as i32;
+                                if mode <= 0 {
+                                    if let Some(gradient) = shape.gradient.take()
+                                        && let Some(first) = gradient.stops.first()
+                                    {
+                                        shape.fill = first.color.clone();
+                                    }
+                                } else {
+                                    let fill = shape.fill.clone();
+                                    let gradient = shape.gradient.get_or_insert_with(|| {
+                                        model::ShapeGradient::from_fill(&fill)
+                                    });
+                                    gradient.kind = if mode == 2 {
+                                        model::ShapeGradientKind::Radial
+                                    } else {
+                                        model::ShapeGradientKind::Linear
+                                    };
+                                }
+                            }
+                            ClipField::ShapeGradientCount => {
+                                let fill = shape.fill.clone();
+                                let gradient = shape
+                                    .gradient
+                                    .get_or_insert_with(|| model::ShapeGradient::from_fill(&fill));
+                                let count = (value.round() as usize).clamp(2, 4);
+                                while gradient.stops.len() < count {
+                                    let before_last = gradient.stops.len().saturating_sub(1);
+                                    let color = gradient
+                                        .stops
+                                        .get(before_last)
+                                        .map(|stop| stop.color.clone())
+                                        .unwrap_or_else(|| "#7c3aed".to_owned());
+                                    gradient.stops.insert(
+                                        before_last,
+                                        model::ShapeGradientStop {
+                                            position: 0.5,
+                                            color,
+                                        },
+                                    );
+                                }
+                                while gradient.stops.len() > count {
+                                    let before_last = gradient.stops.len().saturating_sub(2);
+                                    gradient.stops.remove(before_last);
+                                }
+                                let denominator = (count - 1) as f64;
+                                for (index, stop) in gradient.stops.iter_mut().enumerate() {
+                                    stop.position = index as f64 / denominator;
+                                }
+                            }
+                            ClipField::ShapeGradientAngle => {
+                                if let Some(gradient) = shape.gradient.as_mut() {
+                                    gradient.angle = value.rem_euclid(360.0);
+                                }
+                            }
+                            ClipField::ShapeGradientCenterX => {
+                                if let Some(gradient) = shape.gradient.as_mut() {
+                                    gradient.center_x = value.clamp(0.0, 1.0);
+                                }
+                            }
+                            ClipField::ShapeGradientCenterY => {
+                                if let Some(gradient) = shape.gradient.as_mut() {
+                                    gradient.center_y = value.clamp(0.0, 1.0);
+                                }
+                            }
+                            ClipField::ShapeGradientRadius => {
+                                if let Some(gradient) = shape.gradient.as_mut() {
+                                    gradient.radius = value.clamp(0.05, 2.0);
+                                }
+                            }
+                            ClipField::ShapeGradientPosition1
+                            | ClipField::ShapeGradientPosition2
+                            | ClipField::ShapeGradientPosition3
+                            | ClipField::ShapeGradientPosition4 => {
+                                let index = match field {
+                                    ClipField::ShapeGradientPosition1 => 0,
+                                    ClipField::ShapeGradientPosition2 => 1,
+                                    ClipField::ShapeGradientPosition3 => 2,
+                                    _ => 3,
+                                };
+                                if let Some(gradient) = shape.gradient.as_mut()
+                                    && let Some(stop) = gradient.stops.get_mut(index)
+                                {
+                                    stop.position = value.clamp(0.0, 1.0);
+                                    gradient
+                                        .stops
+                                        .sort_by(|a, b| a.position.total_cmp(&b.position));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
             // A media clip has no text; the placeholder must not linger.
             if clip.kind != model::ClipKind::Text {
@@ -5575,15 +5687,43 @@ impl Studio {
             let Some(clip) = self.echo_clip_mut(&id) else {
                 continue;
             };
-            if clip.kind != model::ClipKind::Text {
-                continue;
-            }
-            let text = clip.text.get_or_insert_with(TextStyle::default);
-            match field {
-                ClipTextField::Color => text.color = hex_of(value),
-                ClipTextField::StrokeColor => text.stroke_color = hex_rgba(value),
-                ClipTextField::Background => text.background = hex_with_alpha(value),
-                _ => {}
+            if clip.kind == model::ClipKind::Text {
+                let text = clip.text.get_or_insert_with(TextStyle::default);
+                match field {
+                    ClipTextField::Color => text.color = hex_of(value),
+                    ClipTextField::StrokeColor => text.stroke_color = hex_rgba(value),
+                    ClipTextField::Background => text.background = hex_with_alpha(value),
+                    _ => {}
+                }
+            } else if clip.kind == model::ClipKind::Shape {
+                let shape = clip.shape.get_or_insert_with(model::ShapeStyle::default);
+                match field {
+                    ClipTextField::ShapeFill => shape.fill = hex_rgba(value),
+                    ClipTextField::ShapeStroke => shape.stroke = hex_rgba(value),
+                    ClipTextField::ShapeGradientColor1
+                    | ClipTextField::ShapeGradientColor2
+                    | ClipTextField::ShapeGradientColor3
+                    | ClipTextField::ShapeGradientColor4 => {
+                        let index = match field {
+                            ClipTextField::ShapeGradientColor1 => 0,
+                            ClipTextField::ShapeGradientColor2 => 1,
+                            ClipTextField::ShapeGradientColor3 => 2,
+                            _ => 3,
+                        };
+                        let fill = shape.fill.clone();
+                        let gradient = shape
+                            .gradient
+                            .get_or_insert_with(|| model::ShapeGradient::from_fill(&fill));
+                        while gradient.stops.len() <= index {
+                            gradient.stops.push(model::ShapeGradientStop {
+                                position: index as f64 / 3.0,
+                                color: "#7c3aed".to_owned(),
+                            });
+                        }
+                        gradient.stops[index].color = hex_rgba(value);
+                    }
+                    _ => {}
+                }
             }
         }
     }
@@ -10336,6 +10476,33 @@ impl Studio {
         // what the knob edits.
         let at = place_in(clip, self.playhead);
         let text = clip.text.clone().unwrap_or_default();
+        let shape = clip.shape.clone().unwrap_or_default();
+        // Even a solid exposes useful candidate stops in the panel. They do
+        // not enter the document until Gradient is selected.
+        let gradient = shape
+            .gradient
+            .clone()
+            .unwrap_or_else(|| model::ShapeGradient::from_fill(&shape.fill));
+        let gradient_stop = |index: usize| {
+            gradient
+                .stops
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| model::ShapeGradientStop {
+                    position: if index == 0 { 0.0 } else { 1.0 },
+                    color: if index == 0 {
+                        shape.fill.clone()
+                    } else {
+                        "#7c3aed".to_owned()
+                    },
+                })
+        };
+        let gradient_stops = [
+            gradient_stop(0),
+            gradient_stop(1),
+            gradient_stop(2),
+            gradient_stop(3),
+        ];
         // Where the family sits in the picker's list; none when nothing on
         // this machine has it, which the picker shows in red.
         let family_row = self
@@ -10450,6 +10617,30 @@ impl Studio {
             tracking: text.tracking as f32,
             text_width: text.max_width as f32,
             text_height: text.max_height as f32,
+            shape_size: shape.size as f32,
+            shape_fill_mode: match shape.gradient.as_ref().map(|fill| fill.kind) {
+                None => 0,
+                Some(model::ShapeGradientKind::Linear) => 1,
+                Some(model::ShapeGradientKind::Radial) => 2,
+            },
+            shape_fill: colour_of(&shape.fill),
+            shape_fill_hex: shape.fill.as_str().into(),
+            shape_stroke: colour_of(&shape.stroke),
+            shape_stroke_hex: shape.stroke.as_str().into(),
+            shape_stroke_width: shape.stroke_width as f32,
+            shape_gradient_angle: gradient.angle as f32,
+            shape_gradient_center_x: gradient.center_x as f32,
+            shape_gradient_center_y: gradient.center_y as f32,
+            shape_gradient_radius: gradient.radius as f32,
+            shape_gradient_count: gradient.stops.len().clamp(2, 4) as i32,
+            shape_gradient_color_1: colour_of(&gradient_stops[0].color),
+            shape_gradient_color_2: colour_of(&gradient_stops[1].color),
+            shape_gradient_color_3: colour_of(&gradient_stops[2].color),
+            shape_gradient_color_4: colour_of(&gradient_stops[3].color),
+            shape_gradient_position_1: gradient_stops[0].position as f32,
+            shape_gradient_position_2: gradient_stops[1].position as f32,
+            shape_gradient_position_3: gradient_stops[2].position as f32,
+            shape_gradient_position_4: gradient_stops[3].position as f32,
             cutout: match &clip.cutout {
                 None => 0,
                 Some(cutout) if cutout.mode == model::CutoutMode::Auto => 1,

@@ -4838,7 +4838,9 @@ mod tests {
 
     #[test]
     fn shape_clips_survive_without_media_and_carry_their_figure() {
-        use crate::model::{ClipKind, ShapeKind, ShapeStyle};
+        use crate::model::{
+            ClipKind, ShapeGradient, ShapeGradientKind, ShapeGradientStop, ShapeKind, ShapeStyle,
+        };
         let mut editor = Editor::new();
         let clip_id = editor
             .apply(Command::AddShapeClip {
@@ -4848,6 +4850,20 @@ mod tests {
                 style: Some(ShapeStyle {
                     kind: ShapeKind::Arrow,
                     fill: "#ff8800".to_owned(),
+                    gradient: Some(ShapeGradient {
+                        kind: ShapeGradientKind::Radial,
+                        stops: vec![
+                            ShapeGradientStop {
+                                position: 0.0,
+                                color: "#ff8800".to_owned(),
+                            },
+                            ShapeGradientStop {
+                                position: 1.0,
+                                color: "#330066cc".to_owned(),
+                            },
+                        ],
+                        ..ShapeGradient::default()
+                    }),
                     ..ShapeStyle::default()
                 }),
                 duration: Some(2.5),
@@ -4865,6 +4881,10 @@ mod tests {
             let shape = clip.shape.as_ref().expect("carries its figure");
             assert_eq!(shape.kind, ShapeKind::Arrow);
             assert_eq!(shape.fill, "#ff8800");
+            assert_eq!(
+                shape.gradient.as_ref().map(|fill| fill.kind),
+                Some(ShapeGradientKind::Radial)
+            );
         }
 
         let document = editor.to_document(&settings());

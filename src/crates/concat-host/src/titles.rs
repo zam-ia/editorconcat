@@ -26,7 +26,8 @@ use concat_core::shader::RevealMap;
 
 use concat_export::{ClipKind, ExportClip};
 use concat_project::model::{
-    ClipKind as ModelClipKind, Project, ShapeKind, ShapeStyle, TextAlign, TextStyle,
+    ClipKind as ModelClipKind, Project, ShapeGradientKind, ShapeKind, ShapeStyle, TextAlign,
+    TextStyle,
 };
 use concat_text::{Align, Figure, Fonts, TitleStyle, WordRect};
 
@@ -625,6 +626,27 @@ fn shape_style(style: &ShapeStyle) -> concat_text::ShapeStyle {
         },
         size: style.size,
         fill: style.fill.clone(),
+        gradient: style
+            .gradient
+            .as_ref()
+            .map(|gradient| concat_text::ShapeGradient {
+                kind: match gradient.kind {
+                    ShapeGradientKind::Linear => concat_text::ShapeGradientKind::Linear,
+                    ShapeGradientKind::Radial => concat_text::ShapeGradientKind::Radial,
+                },
+                angle: gradient.angle,
+                center_x: gradient.center_x,
+                center_y: gradient.center_y,
+                radius: gradient.radius,
+                stops: gradient
+                    .stops
+                    .iter()
+                    .map(|stop| concat_text::ShapeGradientStop {
+                        position: stop.position,
+                        color: stop.color.clone(),
+                    })
+                    .collect(),
+            }),
         stroke: style.stroke.clone(),
         stroke_width: style.stroke_width,
     }

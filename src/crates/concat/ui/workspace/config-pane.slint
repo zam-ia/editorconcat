@@ -648,6 +648,7 @@ export component ConfigPane inherits Rectangle {
                         brush-size: root.brush-size;
                         painting: root.painting;
                         set(field, value) => { root.clip-set(field, value); }
+                        set-colour(field, value) => { root.clip-set-colour(field, value); }
                         commit => { root.clip-commit(); }
                         chain-add(id) => { root.chain-add(false, id); }
                         chain-remove(index) => { root.chain-remove(false, index); }

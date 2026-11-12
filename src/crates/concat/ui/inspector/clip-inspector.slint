@@ -42,6 +42,7 @@ import {
     BackdropData,
     ClipField,
     ClipKind,
+    ClipTextField,
     Keyframes,
     SelectedClipData,
     SelectedTransitionData,
@@ -1039,6 +1040,7 @@ export component VideoPanel inherits VerticalLayout {
     in property <bool> mask-section: true;
 
     callback set(field: ClipField, value: float);
+    callback set-colour(field: ClipTextField, value: color);
     /// A control gesture finished: the accumulated change becomes one command.
     callback commit();
     callback chain-add(id: string);
@@ -1161,12 +1163,242 @@ export component VideoPanel inherits VerticalLayout {
         I18n.t("clipInspector.lighten"),
         I18n.t("clipInspector.darken")
     ];
+    property <[string]> shape-fills: [
+        I18n.t("shapeFill.solid"),
+        I18n.t("shapeFill.linear"),
+        I18n.t("shapeFill.radial")
+    ];
 
     init => { root.seed(); }
     changed selected => { root.seed(); }
 
-    if root.page == 0: Section {
+    // A figure's own paint. Solid remains the old project's exact shape;
+    // selecting a gradient adds a non-destructive multi-stop fill whose
+    // coordinates travel with the figure when it is stretched or resized.
+    if root.page == 0 && root.figure: Section {
         first: true;
+        shape-fill := SectionHeader {
+            title: I18n.t("shapeFill.title");
+            collapsible: true;
+            summary: root.shape-fills[Math.max(0, Math.min(
+                root.selected.shape-fill-mode, root.shape-fills.length - 1))];
+            HelpButton {
+                text: I18n.t("shapeFill.help");
+            }
+        }
+
+        if shape-fill.open: SectionBody {
+            Row {
+                label: I18n.t("common.mode");
+                Select {
+                    options: root.shape-fills;
+                    current: root.selected.shape-fill-mode;
+                    changed(index) => {
+                        root.set(ClipField.shape-fill-mode, index);
+                        root.commit();
+                    }
+                }
+            }
+
+            if root.selected.shape-fill-mode == 0: ColourField {
+                label: I18n.t("common.color");
+                value: root.selected.shape-fill;
+                alpha: true;
+                changed(colour) => {
+                    root.set-colour(ClipTextField.shape-fill, colour);
+                    root.commit();
+                }
+            }
+
+            if root.selected.shape-fill-mode > 0: Row {
+                label: I18n.t("shapeFill.stops");
+                Select {
+                    options: ["2", "3", "4"];
+                    current: root.selected.shape-gradient-count - 2;
+                    changed(index) => {
+                        root.set(ClipField.shape-gradient-count, index + 2);
+                        root.commit();
+                    }
+                }
+            }
+
+            if root.selected.shape-fill-mode > 0: ColourField {
+                label: I18n.t1("shapeFill.stop", "1");
+                value: root.selected.shape-gradient-color-1;
+                alpha: true;
+                changed(colour) => {
+                    root.set-colour(ClipTextField.shape-gradient-color-1, colour);
+                    root.commit();
+                }
+            }
+            if root.selected.shape-fill-mode > 0: Param {
+                label: I18n.t1("shapeFill.stopPosition", "1");
+                value: root.selected.shape-gradient-position-1;
+                minimum: 0;
+                maximum: 1;
+                step: 0.01;
+                default-value: 0;
+                fmt: ParamFormat.fraction;
+                unit: "%";
+                unit-scale: 100;
+                changed(v) => { root.set(ClipField.shape-gradient-position-1, v); root.commit(); }
+            }
+
+            if root.selected.shape-fill-mode > 0: ColourField {
+                label: I18n.t1("shapeFill.stop", "2");
+                value: root.selected.shape-gradient-color-2;
+                alpha: true;
+                changed(colour) => {
+                    root.set-colour(ClipTextField.shape-gradient-color-2, colour);
+                    root.commit();
+                }
+            }
+            if root.selected.shape-fill-mode > 0: Param {
+                label: I18n.t1("shapeFill.stopPosition", "2");
+                value: root.selected.shape-gradient-position-2;
+                minimum: 0;
+                maximum: 1;
+                step: 0.01;
+                default-value: 1;
+                fmt: ParamFormat.fraction;
+                unit: "%";
+                unit-scale: 100;
+                changed(v) => { root.set(ClipField.shape-gradient-position-2, v); root.commit(); }
+            }
+
+            if root.selected.shape-fill-mode > 0 && root.selected.shape-gradient-count >= 3: ColourField {
+                label: I18n.t1("shapeFill.stop", "3");
+                value: root.selected.shape-gradient-color-3;
+                alpha: true;
+                changed(colour) => {
+                    root.set-colour(ClipTextField.shape-gradient-color-3, colour);
+                    root.commit();
+                }
+            }
+            if root.selected.shape-fill-mode > 0 && root.selected.shape-gradient-count >= 3: Param {
+                label: I18n.t1("shapeFill.stopPosition", "3");
+                value: root.selected.shape-gradient-position-3;
+                minimum: 0;
+                maximum: 1;
+                step: 0.01;
+                default-value: 0.67;
+                fmt: ParamFormat.fraction;
+                unit: "%";
+                unit-scale: 100;
+                changed(v) => { root.set(ClipField.shape-gradient-position-3, v); root.commit(); }
+            }
+
+            if root.selected.shape-fill-mode > 0 && root.selected.shape-gradient-count >= 4: ColourField {
+                label: I18n.t1("shapeFill.stop", "4");
+                value: root.selected.shape-gradient-color-4;
+                alpha: true;
+                changed(colour) => {
+                    root.set-colour(ClipTextField.shape-gradient-color-4, colour);
+                    root.commit();
+                }
+            }
+            if root.selected.shape-fill-mode > 0 && root.selected.shape-gradient-count >= 4: Param {
+                label: I18n.t1("shapeFill.stopPosition", "4");
+                value: root.selected.shape-gradient-position-4;
+                minimum: 0;
+                maximum: 1;
+                step: 0.01;
+                default-value: 1;
+                fmt: ParamFormat.fraction;
+                unit: "%";
+                unit-scale: 100;
+                changed(v) => { root.set(ClipField.shape-gradient-position-4, v); root.commit(); }
+            }
+
+            if root.selected.shape-fill-mode == 1: Param {
+                label: I18n.t("shapeFill.angle");
+                value: root.selected.shape-gradient-angle;
+                minimum: 0;
+                maximum: 360;
+                step: 1;
+                default-value: 0;
+                fmt: ParamFormat.degrees;
+                unit: "°";
+                changed(v) => { root.set(ClipField.shape-gradient-angle, v); root.commit(); }
+            }
+
+            if root.selected.shape-fill-mode == 2: Param {
+                label: I18n.t("common.positionX");
+                value: root.selected.shape-gradient-center-x;
+                minimum: 0;
+                maximum: 1;
+                step: 0.01;
+                default-value: 0.5;
+                fmt: ParamFormat.fraction;
+                unit: "%";
+                unit-scale: 100;
+                changed(v) => { root.set(ClipField.shape-gradient-center-x, v); root.commit(); }
+            }
+            if root.selected.shape-fill-mode == 2: Param {
+                label: I18n.t("common.positionY");
+                value: root.selected.shape-gradient-center-y;
+                minimum: 0;
+                maximum: 1;
+                step: 0.01;
+                default-value: 0.5;
+                fmt: ParamFormat.fraction;
+                unit: "%";
+                unit-scale: 100;
+                changed(v) => { root.set(ClipField.shape-gradient-center-y, v); root.commit(); }
+            }
+            if root.selected.shape-fill-mode == 2: Param {
+                label: I18n.t("shapeFill.radius");
+                value: root.selected.shape-gradient-radius;
+                minimum: 0.05;
+                maximum: 2;
+                step: 0.01;
+                default-value: 0.75;
+                fmt: ParamFormat.fraction;
+                unit: "%";
+                unit-scale: 100;
+                changed(v) => { root.set(ClipField.shape-gradient-radius, v); root.commit(); }
+            }
+
+            Subhead { title: I18n.t("shapeFill.outline"); }
+            ColourField {
+                label: I18n.t("common.color");
+                value: root.selected.shape-stroke;
+                alpha: true;
+                changed(colour) => {
+                    root.set-colour(ClipTextField.shape-stroke, colour);
+                    root.commit();
+                }
+            }
+            Param {
+                label: I18n.t("shapeFill.outlineWidth");
+                value: root.selected.shape-stroke-width;
+                minimum: 0;
+                maximum: 0.2;
+                step: 0.002;
+                default-value: 0;
+                fmt: ParamFormat.fraction;
+                unit: "%";
+                unit-scale: 100;
+                changed(v) => { root.set(ClipField.shape-stroke-width, v); root.commit(); }
+            }
+
+            Param {
+                label: I18n.t("common.size");
+                value: root.selected.shape-size;
+                minimum: 0.01;
+                maximum: 2;
+                step: 0.01;
+                default-value: 0.35;
+                fmt: ParamFormat.fraction;
+                unit: "%";
+                unit-scale: 100;
+                changed(v) => { root.set(ClipField.shape-size, v); root.commit(); }
+            }
+        }
+    }
+
+    if root.page == 0: Section {
+        first: !root.figure;
         transform := SectionHeader {
             title: I18n.t("clipInspector.transform");
             collapsible: true;
