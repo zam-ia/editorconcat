@@ -39,6 +39,12 @@
 </div>
 
 
+## EditorConcat fork
+
+This repository is the maintained CRISDAL/EditorConcat build used as a restorable backup of the customized editor. It is based on the original open-source [jub0t/Concat](https://github.com/jub0t/Concat) project and keeps that repository configured as the `upstream` Git remote so future upstream improvements can be reviewed and integrated without losing the custom work.
+
+The fork adds a lighter CapCut-inspired workflow, expanded inspector and timeline controls, creative SFX/LUT/transition/motion assets, text-animation improvements, and multi-stop linear and radial gradients for shapes.
+
 ## About
 
 Concat is a free, open-source video editor and a CapCut alternative for macOS, Windows, Linux and Android. It covers what people actually open CapCut for: auto-captions, text-to-speech, background removal, keyframe animation, effects and titles, multi-track cutting, 4K export. With none of the catches: no watermark, no account, no subscription, no upload.
