@@ -1596,6 +1596,9 @@ fn clip_commands(id: &str, before: &Clip, after: &Clip) -> Vec<Command> {
     if after.text != before.text {
         patch.text = Some(after.text.clone());
     }
+    if after.shape != before.shape {
+        patch.shape = Some(after.shape.clone());
+    }
     if after.video_effects != before.video_effects {
         patch.video_effects = Some(after.video_effects.clone());
     }
@@ -13846,5 +13849,120 @@ mod tests {
                 "one undo puts {id} back"
             );
         }
+    }
+
+    /// The Fill header's Reset button writes several inspector fields on the
+    /// echo and commits them together.  `clip_commands` is that exact commit
+    /// boundary: no matter how many paint parameters changed, the editor must
+    /// receive one batch and one undo must restore the complete prior style.
+    #[test]
+    fn shape_fill_reset_is_one_atomic_undo_step() {
+        use concat_project::Editor;
+        use concat_project::model::{
+            ShapeGradient, ShapeGradientKind, ShapeGradientStop, ShapeKind, ShapeStyle,
+        };
+
+        let mut editor = Editor::new();
+        let clip_id = editor
+            .apply(Command::AddShapeClip {
+                above: true,
+                track_id: None,
+                start: 1.0,
+                style: Some(ShapeStyle {
+                    kind: ShapeKind::Arrow,
+                    size: 0.82,
+                    fill: "#112233cc".to_owned(),
+                    stroke: "#fedcba99".to_owned(),
+                    stroke_width: 0.19,
+                    gradient: Some(ShapeGradient {
+                        kind: ShapeGradientKind::Radial,
+                        stops: vec![
+                            ShapeGradientStop {
+                                position: 0.0,
+                                color: "#ff0000ff".to_owned(),
+                            },
+                            ShapeGradientStop {
+                                position: 0.37,
+                                color: "#00ff00aa".to_owned(),
+                            },
+                            ShapeGradientStop {
+                                position: 1.0,
+                                color: "#0000ffff".to_owned(),
+                            },
+                        ],
+                        angle: 73.0,
+                        center_x: 0.21,
+                        center_y: 0.74,
+                        radius: 0.93,
+                    }),
+                }),
+                duration: Some(2.5),
+                name: "Reset fixture".to_owned(),
+            })
+            .expect("adds the custom shape")
+            .created_id
+            .expect("with an id");
+        editor.end_gesture();
+
+        let before = editor
+            .project()
+            .active()
+            .clip(&clip_id)
+            .expect("shape exists")
+            .clone();
+        let mut after = before.clone();
+        let shape = after.shape.as_mut().expect("shape style");
+        // These are the defaults written by the Fill ResetButton.  The kind
+        // is deliberately preserved: resetting paint must not turn an arrow
+        // into a square.
+        shape.gradient = None;
+        shape.fill = "#ffffffff".to_owned();
+        shape.stroke = "#00000000".to_owned();
+        shape.stroke_width = 0.012;
+        shape.size = 0.35;
+
+        let commands = super::clip_commands(&clip_id, &before, &after);
+        assert!(!commands.is_empty(), "the reset has a real project edit");
+        editor
+            .apply(Command::Batch { commands })
+            .expect("the reset batch applies");
+
+        let reset = editor
+            .project()
+            .active()
+            .clip(&clip_id)
+            .expect("shape remains")
+            .shape
+            .as_ref()
+            .expect("style remains");
+        assert_eq!(reset.kind, ShapeKind::Arrow, "the figure is not reset");
+        assert_eq!(reset.fill, "#ffffffff");
+        assert_eq!(reset.stroke, "#00000000");
+        assert_eq!(reset.stroke_width, 0.012);
+        assert_eq!(reset.size, 0.35);
+        assert!(reset.gradient.is_none());
+
+        assert!(editor.undo(), "one undo restores the complete paint state");
+        assert_eq!(
+            editor.project().active().clip(&clip_id),
+            Some(&before),
+            "every former fill parameter returns together"
+        );
+        assert!(editor.redo(), "the same atomic reset can be redone");
+        assert_eq!(
+            editor.project().active().clip(&clip_id),
+            Some(&after),
+            "redo reapplies the whole reset"
+        );
+
+        let document = editor.to_document(&concat_project::DocumentSettings {
+            name: "Atomic reset".to_owned(),
+            width: 1920,
+            height: 1080,
+            rate_num: 30,
+            rate_den: 1,
+        });
+        let reopened = Editor::from_document(&document).expect("the reset project reopens");
+        assert_eq!(reopened.project(), editor.project());
     }
 }

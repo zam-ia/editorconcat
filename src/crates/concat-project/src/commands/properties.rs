@@ -81,6 +81,9 @@ pub(super) fn apply(
                 }
                 applied |= assign(&mut clip.text, text);
             }
+            if let Some(shape) = patch.shape {
+                applied |= assign(&mut clip.shape, shape.map(ShapeStyle::tidy));
+            }
             if let Some(stream) = patch.audio_stream {
                 applied |= assign(&mut clip.audio_stream, stream);
             }

@@ -160,6 +160,16 @@ pub struct ClipPatch {
     )]
     #[cfg_attr(feature = "schema", schemars(with = "Option<TextStyle>"))]
     pub text: Option<Option<TextStyle>>,
+    /// The shape styling, with the same three-way semantics as `text`.
+    /// This patches the style already persisted on a shape clip; it does not
+    /// alter the project document schema used by 0.2.x projects.
+    #[serde(
+        default,
+        with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<ShapeStyle>"))]
+    pub shape: Option<Option<ShapeStyle>>,
     /// Which of the media's audio streams the clip plays, by stream index:
     /// absent leaves it alone, null goes back to the file's first, a value
     /// names one. See `Clip::audio_stream`.
@@ -1109,6 +1119,17 @@ impl Command {
                             style.max_width,
                             style.max_height,
                         ])
+                    })
+                    || patch.shape.iter().flatten().any(|style| {
+                        bad([style.size, style.stroke_width])
+                            || style.gradient.as_ref().is_some_and(|gradient| {
+                                bad([
+                                    gradient.angle,
+                                    gradient.center_x,
+                                    gradient.center_y,
+                                    gradient.radius,
+                                ]) || gradient.stops.iter().any(|stop| !stop.position.is_finite())
+                            })
                     })
             }
             Command::SetClipSpeed { speed, .. } => bad([*speed]),

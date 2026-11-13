@@ -1,6 +1,6 @@
 # Auditoría funcional P0 de Concat Studio
 
-**Fecha:** 12 de noviembre de 2026  
+**Fecha:** 13 de noviembre de 2026
 **Base examinada:** EditorConcat sobre Concat 0.2.8  
 **Especificación:** `CONCAT_STUDIO_Especificacion_Maestra_UX_Funcional_v1.md`
 
@@ -15,6 +15,31 @@ sin recorrido hasta preview/export queda como `Visual` o `Parcial`.
 - **Parcial:** funciona un subconjunto o falta una parte del contrato.
 - **Funcional:** UI, modelo y motor están conectados.
 - **Probado:** además tiene prueba automatizada relevante.
+
+`Probado` en la matriz funcional exige que la columna de evidencia identifique
+automatización pertinente. La ejecución actual se informa separadamente como
+`PASS P0.1`; la presencia de código, UI o un test con cero casos ejecutados no
+cuenta como verificación.
+
+## Matriz contractual automatizada P0.1
+
+Runner reproducible: `scripts/ci/qa-contract.ps1`. Limita el build a un trabajo
+para que el gran test binario de Slint/Skia no se enlace dos veces en paralelo.
+
+| Contrato | Procesamiento real | Undo/redo | Persistencia | Preview/export | 0.2.x | Evidencia automatizada | Resultado 13-11-2026 |
+|---|---|---|---|---|---|---|---|
+| Reset atómico de relleno | Sí: aplica un `ClipPatch.shape` real | Sí: un undo restaura el estilo completo; redo repone el reset | Sí: round-trip posterior | Cubierto por la regresión de forma degradada | El campo `shape` persistente ya existía; el patch es opcional | `studio::tests::shape_fill_reset_is_one_atomic_undo_step` | **PASS P0.1** |
+| Historial de proyecto | N/A | Sí | N/A | N/A | Sí | `concat_project::tests::undo_and_redo_walk_the_history` | **PASS P0.1** |
+| Documento | N/A | N/A | Sí | N/A | Sí | `concat_project::tests::the_document_round_trips` | **PASS P0.1** |
+| Documento plano heredado | N/A | N/A | Sí | N/A | Sí | `concat_project::tests::a_legacy_flat_document_loads_as_one_timeline` | **PASS P0.1** |
+| Sesión guardada/reabierta | N/A | N/A | Sí | N/A | Sí | `concat_host::session::tests::a_fresh_project_opens_empty_and_round_trips_a_save` | **PASS P0.1** |
+| Paridad de fondo | Sí: render y decode del archivo exportado | N/A | Fondo en documento | Sí: monitor y export | Sí | `concat_host/tests/export.rs::a_background_fills_the_bars_in_the_export_and_the_monitor` | **PASS P0.1** |
+| Regresión audiovisual | Sí: 35 estados exportados y leídos | Incluye estado deshecho | Sí, a través del documento editado | Sí, H.264 leído después del encode | Incluye timeline alterna y FPS racional | `concat_host/tests/export.rs::every_edit_still_exports` | **PASS P0.1** |
+
+La corrida completa terminó con **7/7 contratos PASS**. `every_edit_still_exports`
+verificó 35 estados: split, trims, movimientos, velocidades, undo, freeze,
+transiciones, efectos y keys, crop/blend/fades, títulos, forma degradada, audio
+separado/reunido, mute/visible, 60/1, 30000/1001, 24/1 y segunda timeline.
 
 ## Mapa de responsabilidades real
 
@@ -118,11 +143,11 @@ Esta entrega cierra el hallazgo 7 sin crear una función decorativa:
 | Criterio | Evidencia |
 |---|---|
 | Cambio perceptible | Muestreo rojo→azul en `concat-host::titles` |
-| Undo/redo | `shape_clips_survive_without_media_and_carry_their_figure` |
-| Save/reopen | Round-trip del documento en la misma prueba |
+| Undo/redo | `studio::tests::shape_fill_reset_is_one_atomic_undo_step` |
+| Save/reopen | Round-trip explícito dentro de `shape_fill_reset_is_one_atomic_undo_step` y `the_document_round_trips` |
 | Preview/export match | Raster del host + export H.264 leído de vuelta |
 | Compatibilidad | `gradient: None` mantiene proyectos anteriores como sólidos |
-| Reset | `ResetButton` del grupo Relleno, un solo `commit()` |
+| Reset | `ResetButton` del grupo Relleno → `ClipPatch.shape`; un `Command::Batch`, un undo |
 
 ## Siguientes slices recomendados
 
