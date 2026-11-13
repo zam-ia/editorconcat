@@ -45,8 +45,8 @@ use concat_media::{
 };
 use concat_project::commands::{ClipMove, ClipPatch, Command, TrackFlag, TrimEdge};
 use concat_project::model::{
-    AppliedFilter, ColorRange, Crop, KeyEase, KeyProperty, SpeedPoint, TextStyle, Transition,
-    VideoSettings,
+    AppliedFilter, ColorRange, Crop, KeyEase, KeyProperty, ShapeGradient, ShapeGradientKind,
+    ShapeGradientStop, ShapeStyle, SpeedPoint, TextStyle, Transition, VideoSettings,
 };
 
 /// The sample rate every source and every export carries.
@@ -1731,6 +1731,48 @@ fn every_edit_still_exports() {
     let exported = studio.export("title");
     exported.expect_length(end);
     exported.expect_sound(end);
+
+    // A multi-stop shape is not merely inspector state: it is painted into
+    // the same flattened list as the monitor sees and survives the encoder.
+    studio.apply(Command::AddShapeClip {
+        above: true,
+        track_id: None,
+        start: 9.0,
+        style: Some(ShapeStyle {
+            size: 0.9,
+            gradient: Some(ShapeGradient {
+                kind: ShapeGradientKind::Linear,
+                angle: 0.0,
+                stops: vec![
+                    ShapeGradientStop {
+                        position: 0.0,
+                        color: "#ff0000".to_owned(),
+                    },
+                    ShapeGradientStop {
+                        position: 1.0,
+                        color: "#0000ff".to_owned(),
+                    },
+                ],
+                ..ShapeGradient::default()
+            }),
+            ..ShapeStyle::default()
+        }),
+        duration: Some(1.0),
+        name: "Gradient proof".to_owned(),
+    });
+    let exported = studio.export("gradient shape");
+    exported.expect_length(end);
+    exported.expect_sound(end);
+    let left = exported.colour_at_point(9.5, 0.30, 0.50);
+    let right = exported.colour_at_point(9.5, 0.70, 0.50);
+    assert!(
+        left[0] > left[2] * 2,
+        "left side is red after encode: {left:?}"
+    );
+    assert!(
+        right[2] > right[0] * 2,
+        "right side is blue after encode: {right:?}"
+    );
 
     // A photograph, a silent clip, sound-only clips on their own track:
     // the AAC the mix writes and a plain PCM file.

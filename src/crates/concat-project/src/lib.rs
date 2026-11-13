@@ -3627,6 +3627,13 @@ mod tests {
             .expect("adds")
             .created_id
             .expect("id");
+
+        assert!(editor.undo(), "the gradient clip is one undoable edit");
+        assert!(
+            editor.project().active().clip(&clip_id).is_none(),
+            "undo removes the whole shape, not only its paint"
+        );
+        assert!(editor.redo(), "the gradient clip can be restored");
         {
             let clip = editor.project().active().clip(&clip_id).expect("exists");
             assert_eq!(clip.name, "Lower third");

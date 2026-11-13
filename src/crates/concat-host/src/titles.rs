@@ -705,7 +705,8 @@ mod tests {
             "it is on the clip"
         );
 
-        let out = Titles::new(&dirs).clips(editor.project(), 640, 360);
+        let titles = Titles::new(&dirs);
+        let out = titles.clips(editor.project(), 640, 360);
         assert_eq!((out[0].clip.stretch_x, out[0].clip.stretch_y), (1.0, 1.0));
         assert_eq!(
             out[0].clip.scale, 1.03,
@@ -920,12 +921,30 @@ mod tests {
     fn a_shape_rejoins_as_a_still_and_keeps_its_stretch() {
         let dirs = scratch("shape");
         let mut editor = Editor::new();
+        let style = concat_project::model::ShapeStyle {
+            gradient: Some(concat_project::model::ShapeGradient {
+                kind: concat_project::model::ShapeGradientKind::Linear,
+                angle: 0.0,
+                stops: vec![
+                    concat_project::model::ShapeGradientStop {
+                        position: 0.0,
+                        color: "#ff0000".to_owned(),
+                    },
+                    concat_project::model::ShapeGradientStop {
+                        position: 1.0,
+                        color: "#0000ff".to_owned(),
+                    },
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
         let id = editor
             .apply(Command::AddShapeClip {
                 above: true,
                 track_id: None,
                 start: 0.0,
-                style: None,
+                style: Some(style),
                 duration: Some(3.0),
                 name: "Square".to_owned(),
             })
@@ -944,7 +963,8 @@ mod tests {
             })
             .expect("pulled wide");
 
-        let out = Titles::new(&dirs).clips(editor.project(), 640, 360);
+        let titles = Titles::new(&dirs);
+        let out = titles.clips(editor.project(), 640, 360);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].clip_id, id);
         assert!(matches!(out[0].clip.kind, ClipKind::Image));
@@ -956,5 +976,20 @@ mod tests {
             Path::new(&out[0].clip.path).is_file(),
             "painted to disk like a title"
         );
+
+        // The monitor takes the same painted shape in memory that the
+        // exporter receives from the disk path above. Sample both sides of
+        // the figure: angle zero must travel from red to blue, rather than
+        // merely storing a gradient the renderer ignores.
+        let live = titles.clips_live(editor.project(), 640, 360);
+        let frame = live[0].frame.as_ref().expect("the live gradient frame");
+        let pixel = |x: usize, y: usize| {
+            let at = (y * frame.width() as usize + x) * 4;
+            &frame.pixels()[at..at + 4]
+        };
+        let left = pixel(270, 180);
+        let right = pixel(370, 180);
+        assert!(left[0] > left[2] * 2, "left side is red: {left:?}");
+        assert!(right[2] > right[0] * 2, "right side is blue: {right:?}");
     }
 }

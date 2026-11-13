@@ -1182,6 +1182,21 @@ export component VideoPanel inherits VerticalLayout {
             collapsible: true;
             summary: root.shape-fills[Math.max(0, Math.min(
                 root.selected.shape-fill-mode, root.shape-fills.length - 1))];
+            ResetButton {
+                dirty: root.selected.shape-fill-mode != 0
+                    || root.selected.shape-fill != #ffffff
+                    || root.selected.shape-stroke.to-hsv().alpha != 0
+                    || root.selected.shape-stroke-width != 0.012
+                    || root.selected.shape-size != 0.35;
+                reset => {
+                    root.set(ClipField.shape-fill-mode, 0);
+                    root.set-colour(ClipTextField.shape-fill, #ffffff);
+                    root.set-colour(ClipTextField.shape-stroke, #00000000);
+                    root.set(ClipField.shape-stroke-width, 0.012);
+                    root.set(ClipField.shape-size, 0.35);
+                    root.commit();
+                }
+            }
             HelpButton {
                 text: I18n.t("shapeFill.help");
             }
