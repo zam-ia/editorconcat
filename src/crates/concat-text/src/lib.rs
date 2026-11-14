@@ -81,6 +81,15 @@ pub struct TitleStyle {
     pub stroke_color: String,
     /// A soft drop shadow behind the words.
     pub shadow: bool,
+    pub shadow_color: String,
+    pub shadow_intensity: f64,
+    pub shadow_blur: f64,
+    pub shadow_distance: f64,
+    /// A centred, blurred copy behind the glyphs.
+    pub glow: bool,
+    pub glow_color: String,
+    pub glow_intensity: f64,
+    pub glow_blur: f64,
     /// A plate behind the block, `#rrggbb[aa]`; empty for none.
     pub background: String,
     /// The plate's corner radius as a fraction of frame height; zero is
@@ -1473,20 +1482,72 @@ fn paint(
         }
     }
 
-    // The shadow: the words again, offset down and right, black, blurred on
-    // a layer of their own and laid under the real words.
-    if style.shadow
+    // Glow first: a centred copy, diffused on its own layer. It is behind
+    // the shadow and glyphs and therefore never changes their fill.
+    if style.glow
+        && style.glow_intensity > 0.0
         && let Some(words) = &words
         && let Some(mut layer) = Pixmap::new(width, height)
+        && let Some(mut halo) = colour(&style.glow_color)
     {
+        halo = Color::from_rgba8(
+            (halo.red() * 255.0).round() as u8,
+            (halo.green() * 255.0).round() as u8,
+            (halo.blue() * 255.0).round() as u8,
+            (halo.alpha() * style.glow_intensity.clamp(0.0, 1.0) as f32 * 255.0).round() as u8,
+        );
+        let mut shine = Paint {
+            anti_alias: true,
+            ..Paint::default()
+        };
+        shine.set_color(halo);
+        layer.fill_path(
+            words,
+            &shine,
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+        let radius = (em * style.glow_blur.clamp(0.0, 0.5) as f32).round() as usize;
+        if radius > 0 {
+            blur(&mut layer, radius);
+        }
+        canvas.draw_pixmap(
+            0,
+            0,
+            layer.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+    }
+
+    // The shadow: the words again, with user-controlled colour, strength,
+    // diffusion and distance, on a layer of their own.
+    if style.shadow
+        && style.shadow_intensity > 0.0
+        && let Some(words) = &words
+        && let Some(mut layer) = Pixmap::new(width, height)
+        && let Some(mut color) = colour(&style.shadow_color)
+    {
+        color = Color::from_rgba8(
+            (color.red() * 255.0).round() as u8,
+            (color.green() * 255.0).round() as u8,
+            (color.blue() * 255.0).round() as u8,
+            (color.alpha() * style.shadow_intensity.clamp(0.0, 1.0) as f32 * 255.0).round() as u8,
+        );
         let mut shade = Paint {
             anti_alias: true,
             ..Paint::default()
         };
-        shade.set_color(Color::from_rgba8(0, 0, 0, 150));
-        let offset = Transform::from_translate(em * 0.05, em * 0.07);
+        shade.set_color(color);
+        let distance = em * style.shadow_distance.clamp(0.0, 0.5) as f32;
+        let offset = Transform::from_translate(distance * 0.7, distance);
         layer.fill_path(words, &shade, FillRule::Winding, offset, None);
-        blur(&mut layer, (em * 0.04).round().max(1.0) as usize);
+        let radius = (em * style.shadow_blur.clamp(0.0, 0.5) as f32).round() as usize;
+        if radius > 0 {
+            blur(&mut layer, radius);
+        }
         canvas.draw_pixmap(
             0,
             0,
@@ -2016,6 +2077,14 @@ mod tests {
             stroke_width: 0.0,
             stroke_color: "#000000".to_owned(),
             shadow: true,
+            shadow_color: "#000000".to_owned(),
+            shadow_intensity: 150.0 / 255.0,
+            shadow_blur: 0.04,
+            shadow_distance: 0.07,
+            glow: false,
+            glow_color: "#ffffff".to_owned(),
+            glow_intensity: 0.5,
+            glow_blur: 0.08,
             background: String::new(),
             background_radius: 0.0135,
             background_padding_x: 0.0315,

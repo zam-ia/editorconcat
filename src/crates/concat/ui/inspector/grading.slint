@@ -5,6 +5,9 @@ import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
 import { Fmt } from "../util.slint";
 import { NumberField } from "../primitives/number-field.slint";
+import { Button } from "../primitives/modal.slint";
+import { SegmentedControl } from "../primitives/segmented-control.slint";
+import { Section, SectionBody, SectionHeader } from "../primitives/panel.slint";
 import { ClipField } from "../timeline/model.slint";
 import { KeyCluster } from "controls.slint";
 
@@ -77,6 +80,81 @@ export struct CurveGroupData {
 global CurveTint {
     public pure function of(channel: int) -> color {
         return channel == 1 ? #e5484d : channel == 2 ? #46a758 : channel == 3 ? #4c7df0 : Theme.fg;
+    }
+}
+
+/// Histogram, waveform, RGB parade and vectorscope generated together from
+/// the processed compositor frame. The chosen instrument is view state only.
+export component ScopePanel inherits VerticalLayout {
+    in property <bool> busy;
+    in property <image> histogram;
+    in property <image> waveform;
+    in property <image> parade;
+    in property <image> vectorscope;
+    in property <string> signal;
+    in property <float> milliseconds;
+    in property <bool> clipped;
+    callback request();
+
+    property <int> current;
+    property <bool> expanded;
+    init => { root.request(); }
+
+    Section {
+        header := SectionHeader {
+            title: I18n.lang == "es" ? "Scopes de color" : "Colour scopes";
+            collapsible: true;
+        }
+        if header.open: SectionBody {
+            SegmentedControl {
+                options: ["Histograma", "Waveform", "RGB Parade", "Vectorscope"];
+                current <=> root.current;
+                changed(index) => { root.current = index; root.request(); }
+            }
+            Rectangle {
+                height: root.expanded ? 320px : 190px;
+                background: #0c0e12;
+                border-width: 1px;
+                border-color: Theme.line;
+                border-radius: Theme.r-xs;
+                Image {
+                    x: 4px;
+                    y: 4px;
+                    width: parent.width - 8px;
+                    height: parent.height - 8px;
+                    source: root.current == 0 ? root.histogram
+                        : root.current == 1 ? root.waveform
+                        : root.current == 2 ? root.parade : root.vectorscope;
+                    image-fit: contain;
+                }
+                if root.busy: Text {
+                    text: I18n.lang == "es" ? "Analizando…" : "Analysing…";
+                    color: Theme.fg;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            Text {
+                text: root.signal + (root.milliseconds > 0 ? " · " + Math.round(root.milliseconds) + " ms" : "");
+                color: root.clipped ? #ef6461 : Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    label: root.expanded
+                        ? (I18n.lang == "es" ? "Reducir" : "Collapse")
+                        : (I18n.lang == "es" ? "Ampliar" : "Expand");
+                    clicked => { root.expanded = !root.expanded; }
+                }
+                Button {
+                    label: I18n.lang == "es" ? "Actualizar" : "Refresh";
+                    enabled: !root.busy;
+                    clicked => { root.request(); }
+                }
+            }
+        }
     }
 }
 

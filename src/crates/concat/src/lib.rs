@@ -1299,6 +1299,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     editor.on_audio_meter_apply(on_window!(|state| {
         state.audio_meter_apply();
     }));
+    editor.on_scope_request(on_window!(|state| {
+        state.color_scopes_request();
+    }));
 
     editor.on_chain_set_colour(on_lanes!(
         |state, index: i32, key: SharedString, value: slint::Color| {

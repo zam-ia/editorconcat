@@ -1605,6 +1605,23 @@ pub struct TextStyle {
     pub stroke_color: String,
     /// A drop shadow for legibility over footage. On by default.
     pub shadow: bool,
+    /// Shadow colour. Opacity remains a separate control so choosing a
+    /// colour never changes the strength the user dialled.
+    pub shadow_color: String,
+    /// Shadow alpha multiplier, 0..=1.
+    pub shadow_intensity: f64,
+    /// Shadow diffusion radius as a share of the text em.
+    pub shadow_blur: f64,
+    /// Shadow displacement as a share of the text em.
+    pub shadow_distance: f64,
+    /// A centred soft halo around the glyphs.
+    pub glow: bool,
+    /// Glow colour.
+    pub glow_color: String,
+    /// Glow alpha multiplier, 0..=1.
+    pub glow_intensity: f64,
+    /// Glow diffusion radius as a share of the text em.
+    pub glow_blur: f64,
     /// A solid background behind the text, `#rrggbb[aa]`; its alpha is the
     /// background's opacity. Empty string for none. The painter and older
     /// comments call it the plate.
@@ -1656,6 +1673,12 @@ impl TextStyle {
         self.font_weight = finite(self.font_weight, base.font_weight).clamp(100.0, 900.0);
         self.opacity = finite(self.opacity, base.opacity).clamp(0.0, 1.0);
         self.stroke_width = finite(self.stroke_width, base.stroke_width).max(0.0);
+        self.shadow_intensity =
+            finite(self.shadow_intensity, base.shadow_intensity).clamp(0.0, 1.0);
+        self.shadow_blur = finite(self.shadow_blur, base.shadow_blur).clamp(0.0, 0.5);
+        self.shadow_distance = finite(self.shadow_distance, base.shadow_distance).clamp(0.0, 0.5);
+        self.glow_intensity = finite(self.glow_intensity, base.glow_intensity).clamp(0.0, 1.0);
+        self.glow_blur = finite(self.glow_blur, base.glow_blur).clamp(0.0, 0.5);
         self.line_height = finite(self.line_height, base.line_height).max(0.5);
         self.tracking = finite(self.tracking, base.tracking);
         self.max_width = finite(self.max_width, base.max_width).max(0.0);
@@ -1683,6 +1706,14 @@ impl Default for TextStyle {
             stroke_width: 0.0,
             stroke_color: "#000000".to_owned(),
             shadow: true,
+            shadow_color: "#000000".to_owned(),
+            shadow_intensity: 150.0 / 255.0,
+            shadow_blur: 0.04,
+            shadow_distance: 0.07,
+            glow: false,
+            glow_color: "#ffffff".to_owned(),
+            glow_intensity: 0.5,
+            glow_blur: 0.08,
             background: String::new(),
             background_radius: 0.0135,
             background_padding_x: 0.0315,

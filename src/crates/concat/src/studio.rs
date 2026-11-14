@@ -835,6 +835,51 @@ impl Default for AudioMeterState {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ScopeKey {
+    revision: u64,
+    time: f64,
+    width: u32,
+    height: u32,
+    color_space: model::ColorSpace,
+}
+
+struct ColorScopeState {
+    enabled: bool,
+    busy: bool,
+    wanted: bool,
+    job: u64,
+    playback_tick: u8,
+    key: Option<ScopeKey>,
+    histogram: slint::Image,
+    waveform: slint::Image,
+    parade: slint::Image,
+    vectorscope: slint::Image,
+    signal: String,
+    milliseconds: f32,
+    clipped: bool,
+}
+
+impl Default for ColorScopeState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            busy: false,
+            wanted: false,
+            job: 0,
+            playback_tick: 0,
+            key: None,
+            histogram: slint::Image::default(),
+            waveform: slint::Image::default(),
+            parade: slint::Image::default(),
+            vectorscope: slint::Image::default(),
+            signal: String::new(),
+            milliseconds: 0.0,
+            clipped: false,
+        }
+    }
+}
+
 /// The window's state. See the module docs for what is whose.
 pub struct Studio {
     pub host: Host,
@@ -1055,6 +1100,9 @@ pub struct Studio {
     /// are view state and stamped with the document revision that produced
     /// them; only the applied gain becomes a project command.
     audio_meter: AudioMeterState,
+    /// Display-referred colour scopes for the processed monitor frame.
+    /// Images and analysis stamps are view state and never enter the project.
+    color_scopes: ColorScopeState,
     /// The voiceover take, while one runs.
     pub voiceover: crate::panes::voiceover::VoiceoverPane,
     /// Every speaker the voice engine offers, in its own order.
@@ -2505,6 +2553,7 @@ impl Studio {
             source: None,
             meters: crate::meters::MeterFeed::default(),
             audio_meter: AudioMeterState::default(),
+            color_scopes: ColorScopeState::default(),
             voiceover: crate::panes::voiceover::VoiceoverPane::default(),
             text_presets,
             installed_fonts: presets::installed_fonts(&host.dirs),
@@ -3046,6 +3095,116 @@ impl Studio {
         self.handle(crate::panes::Msg::Monitor(
             crate::panes::monitor::MonitorMsg::Request,
         ));
+        if self.color_scopes.enabled {
+            self.request_color_scopes(false);
+        }
+    }
+
+    /// Enables the scopes and requests the processed frame currently visible.
+    pub fn color_scopes_request(&mut self) {
+        self.color_scopes.enabled = true;
+        self.request_color_scopes(true);
+    }
+
+    fn request_color_scopes(&mut self, force: bool) {
+        if self.on_start || self.session.is_none() {
+            return;
+        }
+        if self.playing && !force {
+            self.color_scopes.playback_tick = (self.color_scopes.playback_tick + 1) % 6;
+            if self.color_scopes.playback_tick != 0 {
+                return;
+            }
+        }
+        if self.color_scopes.busy {
+            self.color_scopes.wanted = true;
+            return;
+        }
+        let Some((clips, settings)) = self.preview_clips() else {
+            return;
+        };
+        let (output_width, output_height) = self.output_size();
+        let scale = (320.0 / f64::from(output_width.max(output_height))).min(1.0);
+        let width = (f64::from(output_width) * scale).round().max(2.0) as u32;
+        let height = (f64::from(output_height) * scale).round().max(2.0) as u32;
+        let time = f64::from(self.preview_time());
+        let color_space = self.project().active().video.color_space;
+        let key = ScopeKey {
+            revision: self.revision,
+            time,
+            width,
+            height,
+            color_space,
+        };
+        if !force && self.color_scopes.key == Some(key) {
+            return;
+        }
+        self.color_scopes.busy = true;
+        self.color_scopes.wanted = false;
+        self.color_scopes.job = self.color_scopes.job.wrapping_add(1);
+        let job = self.color_scopes.job;
+        let monitor = self.host.monitor.clone();
+        let spec = concat_host::preview::FrameSpec {
+            time,
+            width,
+            height,
+            moving: false,
+            proxy: false,
+            color_space,
+        };
+        crate::host::spawn_in_project(
+            move || {
+                let started = std::time::Instant::now();
+                let result = monitor.frame(clips, &settings, spec).and_then(|pixels| {
+                    concat_host::scopes::analyse_rgba(
+                        &pixels,
+                        width,
+                        height,
+                        concat_host::scopes::ScopeSignal::of(color_space),
+                    )
+                });
+                (result, started.elapsed())
+            },
+            move |studio, _, _, (result, elapsed)| {
+                if studio.color_scopes.job != job {
+                    return;
+                }
+                studio.color_scopes.busy = false;
+                match result {
+                    Ok(analysis) => {
+                        let image = |bitmap: &concat_host::scopes::ScopeBitmap| {
+                            let buffer =
+                                slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+                                    &bitmap.rgba,
+                                    bitmap.width,
+                                    bitmap.height,
+                                );
+                            slint::Image::from_rgba8(buffer)
+                        };
+                        studio.color_scopes.histogram = image(&analysis.histogram_image);
+                        studio.color_scopes.waveform = image(&analysis.waveform_image);
+                        studio.color_scopes.parade = image(&analysis.parade_image);
+                        studio.color_scopes.vectorscope = image(&analysis.vectorscope_image);
+                        studio.color_scopes.signal = analysis.signal.label().to_owned();
+                        studio.color_scopes.milliseconds = elapsed.as_secs_f32() * 1000.0;
+                        studio.color_scopes.clipped = analysis
+                            .clipped_high
+                            .iter()
+                            .chain(analysis.clipped_low.iter())
+                            .any(|count| *count > 0);
+                        studio.color_scopes.key = Some(key);
+                    }
+                    Err(error) => {
+                        log::warn!("colour scopes: {error}");
+                        studio.color_scopes.signal = error;
+                    }
+                }
+                if studio.color_scopes.wanted {
+                    studio.color_scopes.wanted = false;
+                    studio.request_color_scopes(false);
+                }
+            },
+        );
     }
 
     /// What the monitor draws at the playhead: the document flattened with
@@ -5406,6 +5565,12 @@ impl Studio {
                 }
                 ClipField::StrokeWidth => text.stroke_width = value.clamp(0.0, 0.15),
                 ClipField::Shadow => text.shadow = value != 0.0,
+                ClipField::ShadowIntensity => text.shadow_intensity = value.clamp(0.0, 1.0),
+                ClipField::ShadowBlur => text.shadow_blur = value.clamp(0.0, 0.5),
+                ClipField::ShadowDistance => text.shadow_distance = value.clamp(0.0, 0.5),
+                ClipField::Glow => text.glow = value != 0.0,
+                ClipField::GlowIntensity => text.glow_intensity = value.clamp(0.0, 1.0),
+                ClipField::GlowBlur => text.glow_blur = value.clamp(0.0, 0.5),
                 ClipField::LineHeight => text.line_height = value.clamp(0.7, 2.5),
                 ClipField::Tracking => text.tracking = value.clamp(-0.05, 0.3),
                 ClipField::TextWidth => text.max_width = value.clamp(0.0, 2.0),
@@ -5743,6 +5908,8 @@ impl Studio {
                 match field {
                     ClipTextField::Color => text.color = hex_of(value),
                     ClipTextField::StrokeColor => text.stroke_color = hex_rgba(value),
+                    ClipTextField::ShadowColor => text.shadow_color = hex_rgba(value),
+                    ClipTextField::GlowColor => text.glow_color = hex_rgba(value),
                     ClipTextField::Background => text.background = hex_with_alpha(value),
                     _ => {}
                 }
@@ -9675,6 +9842,14 @@ impl Studio {
             meter.after.and_then(|value| value.true_peak_dbtp),
         ));
         editor.set_audio_meter_message(meter.message.as_str().into());
+        editor.set_scope_busy(self.color_scopes.busy);
+        editor.set_scope_histogram(self.color_scopes.histogram.clone());
+        editor.set_scope_waveform(self.color_scopes.waveform.clone());
+        editor.set_scope_parade(self.color_scopes.parade.clone());
+        editor.set_scope_vectorscope(self.color_scopes.vectorscope.clone());
+        editor.set_scope_signal(self.color_scopes.signal.as_str().into());
+        editor.set_scope_ms(self.color_scopes.milliseconds);
+        editor.set_scope_clipped(self.color_scopes.clipped);
         // The background and Fit and Fill, on their own global: the Details
         // panel, the Video panel and the phone all read it.
         self.publish_backdrop(app);
@@ -11005,6 +11180,16 @@ impl Studio {
             stroke_hex: hex_of(stroke).into(),
             stroke_opacity: f32::from(stroke.alpha()) / 255.0,
             shadow: text.shadow,
+            shadow_color: colour_of(&text.shadow_color),
+            shadow_color_hex: text.shadow_color.as_str().into(),
+            shadow_intensity: text.shadow_intensity as f32,
+            shadow_blur: text.shadow_blur as f32,
+            shadow_distance: text.shadow_distance as f32,
+            glow: text.glow,
+            glow_color: colour_of(&text.glow_color),
+            glow_color_hex: text.glow_color.as_str().into(),
+            glow_intensity: text.glow_intensity as f32,
+            glow_blur: text.glow_blur as f32,
             plate,
             plate_hex: hex_of(plate).into(),
             plated: plate.alpha() > 0,

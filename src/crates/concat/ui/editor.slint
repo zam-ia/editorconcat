@@ -246,6 +246,17 @@ export global Editor {
     callback audio-meter-set-mode(mode: int);
     callback audio-meter-apply();
 
+    // The four colour scopes are rendered from one processed monitor frame.
+    in-out property <bool> scope-busy;
+    in-out property <image> scope-histogram;
+    in-out property <image> scope-waveform;
+    in-out property <image> scope-parade;
+    in-out property <image> scope-vectorscope;
+    in-out property <string> scope-signal;
+    in-out property <float> scope-ms;
+    in-out property <bool> scope-clipped;
+    callback scope-request();
+
     in-out property <[EffectData]> video-effects;
     in-out property <[EffectData]> audio-effects;
     in-out property <float> level;

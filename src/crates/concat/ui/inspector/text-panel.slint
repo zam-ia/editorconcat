@@ -58,6 +58,11 @@ export component TextPanel inherits VerticalLayout {
     property <float> alpha;
     property <float> stroke-width;
     property <float> stroke-alpha;
+    property <float> shadow-intensity;
+    property <float> shadow-blur;
+    property <float> shadow-distance;
+    property <float> glow-intensity;
+    property <float> glow-blur;
     property <float> plate-alpha;
     property <float> plate-radius;
     /// The background's air, in pixels of the frame like the box's sides.
@@ -93,6 +98,11 @@ export component TextPanel inherits VerticalLayout {
         root.alpha = root.selected.text-opacity;
         root.stroke-width = root.selected.stroke-width;
         root.stroke-alpha = root.selected.stroke-opacity;
+        root.shadow-intensity = root.selected.shadow-intensity;
+        root.shadow-blur = root.selected.shadow-blur;
+        root.shadow-distance = root.selected.shadow-distance;
+        root.glow-intensity = root.selected.glow-intensity;
+        root.glow-blur = root.selected.glow-blur;
         root.plate-alpha = root.selected.plate-opacity;
         root.plate-radius = root.selected.plate-radius;
         root.plate-pad-x = root.selected.plate-padding-x * root.frame-h;
@@ -377,6 +387,60 @@ export component TextPanel inherits VerticalLayout {
             HelpButton { text: I18n.t("textPanel.softShadowUnderWords"); }
 
             toggled(on) => { root.set(ClipField.shadow, on ? 1 : 0); root.commit(); }
+        }
+
+        if root.selected.shadow: ColourField {
+            label: I18n.lang == "es" ? "Color de sombra" : "Shadow colour";
+            value: root.selected.shadow-color;
+            alpha: false;
+            changed(colour) => { root.set-colour(ClipTextField.shadow-color, colour); root.commit(); }
+        }
+        if root.selected.shadow: Param {
+            label: I18n.lang == "es" ? "Intensidad" : "Intensity";
+            value <=> root.shadow-intensity;
+            minimum: 0; maximum: 1; step: 0.01; default-value: 0.588;
+            fmt: ParamFormat.fraction; unit: "%"; unit-scale: 100;
+            changed(v) => { root.set(ClipField.shadow-intensity, v); root.commit(); }
+        }
+        if root.selected.shadow: Param {
+            label: I18n.lang == "es" ? "Difusión" : "Diffusion";
+            value <=> root.shadow-blur;
+            minimum: 0; maximum: 0.5; step: 0.005; default-value: 0.04;
+            fmt: ParamFormat.fraction; unit: "%"; unit-scale: 100;
+            changed(v) => { root.set(ClipField.shadow-blur, v); root.commit(); }
+        }
+        if root.selected.shadow: Param {
+            label: I18n.lang == "es" ? "Distancia" : "Distance";
+            value <=> root.shadow-distance;
+            minimum: 0; maximum: 0.5; step: 0.005; default-value: 0.07;
+            fmt: ParamFormat.fraction; unit: "%"; unit-scale: 100;
+            changed(v) => { root.set(ClipField.shadow-distance, v); root.commit(); }
+        }
+
+        SwitchRow {
+            label: I18n.lang == "es" ? "Resplandor" : "Glow";
+            checked: root.selected.glow;
+            toggled(on) => { root.set(ClipField.glow, on ? 1 : 0); root.commit(); }
+        }
+        if root.selected.glow: ColourField {
+            label: I18n.lang == "es" ? "Color del resplandor" : "Glow colour";
+            value: root.selected.glow-color;
+            alpha: false;
+            changed(colour) => { root.set-colour(ClipTextField.glow-color, colour); root.commit(); }
+        }
+        if root.selected.glow: Param {
+            label: I18n.lang == "es" ? "Intensidad" : "Intensity";
+            value <=> root.glow-intensity;
+            minimum: 0; maximum: 1; step: 0.01; default-value: 0.5;
+            fmt: ParamFormat.fraction; unit: "%"; unit-scale: 100;
+            changed(v) => { root.set(ClipField.glow-intensity, v); root.commit(); }
+        }
+        if root.selected.glow: Param {
+            label: I18n.lang == "es" ? "Difusión" : "Diffusion";
+            value <=> root.glow-blur;
+            minimum: 0; maximum: 0.5; step: 0.005; default-value: 0.08;
+            fmt: ParamFormat.fraction; unit: "%"; unit-scale: 100;
+            changed(v) => { root.set(ClipField.glow-blur, v); root.commit(); }
         }
 
         // The background: the plate, to the painter and the document. A

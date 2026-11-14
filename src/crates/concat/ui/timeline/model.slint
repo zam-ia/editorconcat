@@ -168,7 +168,8 @@ export enum ClipField {
     volume, speed, preserve-pitch, fade-in, fade-out,
     flip-h, flip-v, blend, crop-left, crop-top, crop-right, crop-bottom,
     font-size, font-weight, italic, text-opacity, align,
-    stroke-width, shadow, line-height, tracking, text-width, text-height,
+    stroke-width, shadow, shadow-intensity, shadow-blur, shadow-distance,
+    glow, glow-intensity, glow-blur, line-height, tracking, text-width, text-height,
     stroke-opacity,
     /// the background's opacity is its colour's alpha, as the stroke's is;
     /// its corner radius is a fraction of frame height
@@ -324,7 +325,7 @@ export global Backdrop {
 
 /// The same again for the properties that are text rather than numbers.
 export enum ClipTextField {
-    content, font-family, color, stroke-color, background,
+    content, font-family, color, stroke-color, shadow-color, glow-color, background,
     shape-fill, shape-stroke,
     shape-gradient-color-1, shape-gradient-color-2,
     shape-gradient-color-3, shape-gradient-color-4,
@@ -504,6 +505,16 @@ export struct SelectedClipData {
     /// the stroke colour's alpha, 0..1, as its own dial
     stroke-opacity: float,
     shadow: bool,
+    shadow-color: color,
+    shadow-color-hex: string,
+    shadow-intensity: float,
+    shadow-blur: float,
+    shadow-distance: float,
+    glow: bool,
+    glow-color: color,
+    glow-color-hex: string,
+    glow-intensity: float,
+    glow-blur: float,
     /// the background behind the words - the plate, to the painter; fully
     /// transparent means none
     plate: color,

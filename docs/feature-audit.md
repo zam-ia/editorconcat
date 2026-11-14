@@ -95,7 +95,7 @@ stack actual sin una justificación adicional.
 | Velocidad constante y rampa | Probado | Speed map con resolución para video/audio | Sí | Sí | Sí | `speed.rs`, `resolve.rs`, export end-to-end | Flujo óptico no está implementado; timing sigue basado en segundos flotantes |
 | Máscaras | Probado | Lineal, espejo, círculo, rectángulo, corazón y estrella | Sí | Sí | Sí | `ClipMask`, compositor y tests | Polígono, trazado libre y booleanos suma/resta/intersección ausentes |
 | Estabilización | Probado | Análisis + transform/crop compartido | Sí | Sí | Sí | `concat-host/tests/stabilize.rs` | Falta un panel de diagnóstico del análisis y confianza |
-| Texto, caja, trazo y sombra | Probado | `concat-text`, raster no destructivo | Sí | Sí | Sí | pruebas de texto/títulos/export | Controles avanzados de sombra (spread y X/Y separados) no están completos |
+| Texto, caja, trazo, sombra y resplandor | Probado | `concat-text`, raster no destructivo | Sí | Sí | Sí | 27 pruebas de texto + `cargo check -p concat`; controles conectados a visor/export | Sombra expone color, intensidad, difusión y distancia; resplandor color, intensidad y difusión. Spread y X/Y separados siguen pendientes |
 | Animaciones entrada/salida/bucle | Funcional | Presets convertidos a keys/curvas | Sí | Sí | Sí | `motion.rs`, compositor y tests existentes | Catálogo no cubre aún toda la especificación; falta prueba por cada preset |
 | Keyframes y curvas de easing | Probado | Propiedades absolutas, hold/linear/ease/bezier | Sí | Sí | Sí | `KeyProperty`, keyframe pane y tests | No todas las propiedades nuevas son animables; falta multi-selección general |
 | Subtítulos locales | Funcional | Speech local y clips de texto | Sí | Sí | Sí | `concat-speech`, caption workflows | Export `.srt/.vtt` y resaltado palabra a palabra requieren auditoría adicional |
@@ -106,7 +106,7 @@ stack actual sin una justificación adicional.
 | Curvas Luma/R/G/B | Probado | Editor de puntos y curva real | Sí | Sí | Sí | `grading.slint`, manifest y tests | Histograma bajo curva no implementado |
 | HSL selectivo | Parcial | Funciones/bandas HSL en efectos y presets | Sí | Sí | Sí | WGSL de catálogo | No existe aún el editor universal de ocho bandas con eyedropper |
 | LUT `.cube` | Probado | Parser, LUT GPU y cadena FFmpeg | Sí | Sí | Sí | `cube.rs`, `looks.rs`, render tests | Falta advertencia automática Log→Rec.709 y relink UX del LUT |
-| Scopes | Ausente | — | — | — | N/A | No se encontró waveform/parade/vectorscope de color | Requiere módulo de análisis, UI y presupuesto GPU/CPU |
+| Scopes | Probado | Frame procesado display-referred; histograma RGB/Y', waveform Y', RGB parade y vectorscope | Estado UI | Sí | N/A | `concat-host::scopes` 5/5 + `cargo check -p concat`; `docs/color-scopes.md` | HLG/PQ se etiqueta como vista SDR tone-mapped; no es medición HDR en nits |
 | Volumen en dB y fades | Probado | Gain lineal persistido, UI logarítmica; fades reales | Sí | Sí | Sí | inspector, mix y export tests | Curvas de fade seleccionables no están completas |
 | Denoise/mejora de voz | Parcial | Cadena DSP/FFmpeg y módulos locales | Sí | Sí | Sí | paquetes y host jobs | Falta suite cuantitativa 0/50/100, latencia y artefactos por modo |
 | Normalización LUFS | Probado | EBU R128 sobre mezcla renderizada; ganancia constante limitada por dBTP | Sí, usando volumen/keys existentes | Sí | Sí | `rendered_mix_normalization_matches_the_export_signal`; `audio_normalization_is_one_atomic_undo_step_and_persists` | Medición offline, no medidor en vivo; aún no hay buses |
@@ -124,7 +124,7 @@ stack actual sin una justificación adicional.
 2. **P0 — evidencia por función:** existe una base de pruebas excepcionalmente amplia, pero no una
    matriz que impida declarar una función terminada sin save/reopen/undo/export. Este documento se
    convierte en la fuente inicial y debe actualizarse por slice.
-3. **P1 — scopes de color:** son la ausencia profesional más clara del panel de grading.
+3. **P1.2 — scopes de color:** cerrado para señal de monitor display-referred; queda como evolución futura la medición HDR absoluta.
 4. **P1 — audio profesional:** la medición LUFS/true-peak offline y la normalización verificable
    quedan cerradas en este slice. Siguen pendientes buses, solo y routing profesional.
 5. **P1 — proxy UX:** el proxy automático funciona y exporta con originales, pero no ofrece la

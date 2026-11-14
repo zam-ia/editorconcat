@@ -288,6 +288,15 @@ export component Seat inherits Rectangle {
             }
             audio-meter-set-mode(mode) => { Editor.audio-meter-set-mode(mode); }
             audio-meter-apply => { Editor.audio-meter-apply(); }
+            scope-busy: Editor.scope-busy;
+            scope-histogram: Editor.scope-histogram;
+            scope-waveform: Editor.scope-waveform;
+            scope-parade: Editor.scope-parade;
+            scope-vectorscope: Editor.scope-vectorscope;
+            scope-signal: Editor.scope-signal;
+            scope-ms: Editor.scope-ms;
+            scope-clipped: Editor.scope-clipped;
+            scope-request => { Editor.scope-request(); }
             brush-tool: Editor.brush-tool;
             brush-size: Editor.brush-size;
             painting: Editor.painting;

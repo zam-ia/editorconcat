@@ -13,7 +13,7 @@ import {
     SpeedPanel, TransitionPanel, VideoPanel,
 } from "../inspector/clip-inspector.slint";
 import {
-    CurveData, CurveGroupData, WheelData, WheelGroupData,
+    CurveData, CurveGroupData, ScopePanel, WheelData, WheelGroupData,
 } from "../inspector/grading.slint";
 import { TextPanel } from "../inspector/text-panel.slint";
 import {
@@ -206,6 +206,16 @@ export component ConfigPane inherits Rectangle {
     callback audio-meter-set-target(integrated-lufs: float, max-true-peak-dbtp: float);
     callback audio-meter-set-mode(mode: int);
     callback audio-meter-apply();
+
+    in property <bool> scope-busy;
+    in property <image> scope-histogram;
+    in property <image> scope-waveform;
+    in property <image> scope-parade;
+    in property <image> scope-vectorscope;
+    in property <string> scope-signal;
+    in property <float> scope-ms;
+    in property <bool> scope-clipped;
+    callback scope-request();
 
     callback clip-set(field: ClipField, value: float);
     callback clip-set-text(field: ClipTextField, value: string);
@@ -711,14 +721,27 @@ export component ConfigPane inherits Rectangle {
                     apply(preset, duration) => { root.clip-action(preset + "@\{duration}"); }
                 }
 
-                if root.showing == "Adjust": AdjustPanel {
-                    params: root.adjust-params;
-                    wheels: root.adjust-wheels;
-                    curves: root.adjust-curves;
-                    set(key, value) => { root.adjust-set(key, value); }
-                    curve-point(key, point, x, y) => { root.curve-point(-1, key, point, x, y); }
-                    curve-remove(key, point) => { root.curve-remove(-1, key, point); }
-                    commit => { root.clip-commit(); }
+                if root.showing == "Adjust": VerticalLayout {
+                    AdjustPanel {
+                        params: root.adjust-params;
+                        wheels: root.adjust-wheels;
+                        curves: root.adjust-curves;
+                        set(key, value) => { root.adjust-set(key, value); }
+                        curve-point(key, point, x, y) => { root.curve-point(-1, key, point, x, y); }
+                        curve-remove(key, point) => { root.curve-remove(-1, key, point); }
+                        commit => { root.clip-commit(); }
+                    }
+                    ScopePanel {
+                        busy: root.scope-busy;
+                        histogram: root.scope-histogram;
+                        waveform: root.scope-waveform;
+                        parade: root.scope-parade;
+                        vectorscope: root.scope-vectorscope;
+                        signal: root.scope-signal;
+                        milliseconds: root.scope-ms;
+                        clipped: root.scope-clipped;
+                        request => { root.scope-request(); }
+                    }
                 }
 
                 if root.showing == "Layer": FilterPanel {

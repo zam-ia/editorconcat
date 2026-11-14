@@ -136,6 +136,14 @@ impl PresetStyle {
             stroke_width: self.stroke_width.unwrap_or(0.0).max(0.0),
             stroke_color: self.stroke_color.unwrap_or(base.stroke_color),
             shadow: self.shadow.unwrap_or(true),
+            shadow_color: base.shadow_color,
+            shadow_intensity: base.shadow_intensity,
+            shadow_blur: base.shadow_blur,
+            shadow_distance: base.shadow_distance,
+            glow: base.glow,
+            glow_color: base.glow_color,
+            glow_intensity: base.glow_intensity,
+            glow_blur: base.glow_blur,
             background: self.background.unwrap_or_default(),
             background_radius: self
                 .background_radius
