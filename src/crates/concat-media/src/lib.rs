@@ -14,6 +14,7 @@
 //! else in the workspace changes.
 
 pub mod audio;
+pub mod audio_meter;
 pub mod decode;
 pub mod encode;
 pub mod error;

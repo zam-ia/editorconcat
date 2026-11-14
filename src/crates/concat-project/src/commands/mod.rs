@@ -835,6 +835,35 @@ pub enum Command {
     },
 }
 
+/// One non-destructive loudness-normalization edit for existing clips.
+/// Constant gain and every volume automation point move by the same factor;
+/// wrapping the returned children in one [`Command::Batch`] makes undo/redo
+/// atomic without adding a persisted project field or command variant.
+pub fn normalize_clip_gain(clips: &[Clip], gain: f64) -> Command {
+    let gain = if gain.is_finite() { gain.max(0.0) } else { 1.0 };
+    let mut commands = Vec::new();
+    for clip in clips {
+        commands.push(Command::UpdateClip {
+            clip_id: clip.id.clone(),
+            patch: ClipPatch {
+                volume: Some(clip.volume * gain),
+                ..ClipPatch::default()
+            },
+        });
+        commands.extend(
+            clip.keys_on(KeyProperty::Volume)
+                .map(|key| Command::SetClipKey {
+                    clip_id: clip.id.clone(),
+                    property: KeyProperty::Volume,
+                    at: key.at,
+                    value: key.value * gain,
+                    ease: key.ease,
+                }),
+        );
+    }
+    Command::Batch { commands }
+}
+
 /// What a command produced, beyond the new state: the ids it minted, so the
 /// UI can select what it just created, and whether anything changed at all.
 #[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]

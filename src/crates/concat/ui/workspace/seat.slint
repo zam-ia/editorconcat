@@ -264,6 +264,30 @@ export component Seat inherits Rectangle {
             chain-set-param(audio, index, key, value) => {
                 Editor.chain-set-param(audio, index, key, value);
             }
+            audio-meter-scope: Editor.audio-meter-scope;
+            audio-meter-busy: Editor.audio-meter-busy;
+            audio-meter-valid: Editor.audio-meter-valid;
+            audio-meter-progress: Editor.audio-meter-progress;
+            audio-meter-target-lufs: Editor.audio-meter-target-lufs;
+            audio-meter-target-dbtp: Editor.audio-meter-target-dbtp;
+            audio-meter-mode: Editor.audio-meter-mode;
+            audio-meter-i: Editor.audio-meter-i;
+            audio-meter-m: Editor.audio-meter-m;
+            audio-meter-s: Editor.audio-meter-s;
+            audio-meter-lra: Editor.audio-meter-lra;
+            audio-meter-true-peak: Editor.audio-meter-true-peak;
+            audio-meter-sample-peak: Editor.audio-meter-sample-peak;
+            audio-meter-clipped: Editor.audio-meter-clipped;
+            audio-meter-after-i: Editor.audio-meter-after-i;
+            audio-meter-after-true-peak: Editor.audio-meter-after-true-peak;
+            audio-meter-message: Editor.audio-meter-message;
+            audio-meter-analyse(scope) => { Editor.audio-meter-analyse(scope); }
+            audio-meter-cancel => { Editor.audio-meter-cancel(); }
+            audio-meter-set-target(integrated-lufs, max-true-peak-dbtp) => {
+                Editor.audio-meter-set-target(integrated-lufs, max-true-peak-dbtp);
+            }
+            audio-meter-set-mode(mode) => { Editor.audio-meter-set-mode(mode); }
+            audio-meter-apply => { Editor.audio-meter-apply(); }
             brush-tool: Editor.brush-tool;
             brush-size: Editor.brush-size;
             painting: Editor.painting;

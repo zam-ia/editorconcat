@@ -28,6 +28,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use concat_effects::Catalogue;
 use concat_effects::manifest::Kind as PackageKind;
@@ -792,6 +793,48 @@ pub fn sync<T: Clone + PartialEq + 'static>(model: &VecModel<T>, next: Vec<T>) {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum AudioMeterScope {
+    Clip(String),
+    Mix(String),
+}
+
+struct AudioMeterState {
+    scope_index: i32,
+    context: Option<AudioMeterScope>,
+    targets: Vec<String>,
+    target: concat_media::audio_meter::NormalizationTarget,
+    mode: concat_media::audio_meter::NormalizationMode,
+    before: Option<concat_media::audio_meter::LoudnessMeasurement>,
+    after: Option<concat_media::audio_meter::LoudnessMeasurement>,
+    revision: u64,
+    busy: bool,
+    progress: f32,
+    cancel: Option<Arc<AtomicBool>>,
+    job: u64,
+    message: String,
+}
+
+impl Default for AudioMeterState {
+    fn default() -> Self {
+        Self {
+            scope_index: 0,
+            context: None,
+            targets: Vec::new(),
+            target: concat_media::audio_meter::NormalizationTarget::default(),
+            mode: concat_media::audio_meter::NormalizationMode::default(),
+            before: None,
+            after: None,
+            revision: 0,
+            busy: false,
+            progress: 0.0,
+            cancel: None,
+            job: 0,
+            message: String::new(),
+        }
+    }
+}
+
 /// The window's state. See the module docs for what is whose.
 pub struct Studio {
     pub host: Host,
@@ -1008,6 +1051,10 @@ pub struct Studio {
     pub source: Option<crate::source::Source>,
     /// The VU meters' feed; see `crate::meters`.
     pub meters: crate::meters::MeterFeed,
+    /// Offline R128 measurement of the selected clip or final mix. Results
+    /// are view state and stamped with the document revision that produced
+    /// them; only the applied gain becomes a project command.
+    audio_meter: AudioMeterState,
     /// The voiceover take, while one runs.
     pub voiceover: crate::panes::voiceover::VoiceoverPane,
     /// Every speaker the voice engine offers, in its own order.
@@ -2457,6 +2504,7 @@ impl Studio {
             sounds: crate::panes::sounds::SoundsPane::open(&host.dirs),
             source: None,
             meters: crate::meters::MeterFeed::default(),
+            audio_meter: AudioMeterState::default(),
             voiceover: crate::panes::voiceover::VoiceoverPane::default(),
             text_presets,
             installed_fonts: presets::installed_fonts(&host.dirs),
@@ -6881,6 +6929,311 @@ impl Studio {
     // frame under the playhead, so the person can judge both - and see
     // what the whole run will cost - before committing minutes to it.
 
+    /// The exact export-mixer input for an offline loudness measurement,
+    /// plus the clips a constant normalisation gain must edit.
+    fn audio_meter_plan(
+        &self,
+        scope_index: i32,
+    ) -> Option<(
+        AudioMeterScope,
+        Vec<String>,
+        Vec<concat_media::audio::AudioClip>,
+        f64,
+        std::path::PathBuf,
+    )> {
+        let project_dir = self
+            .session
+            .as_ref()
+            .map(|session| std::path::PathBuf::from(session.path()))?;
+        if scope_index == 0 {
+            let id = self.sole_selection()?;
+            let clip = self.clip(&id)?.clone();
+            if !self.clip_has_sound(&clip) {
+                return None;
+            }
+            let mut alone = self.project().clone();
+            alone.active_mut().clips.retain(|held| held.id == clip.id);
+            let mut flattened =
+                concat_export::flatten::flatten_timeline_in(&alone, None, Some(&project_dir));
+            let mut piece = flattened.pop()?;
+            piece.start = 0.0;
+            piece.muted = false;
+            let duration = piece.duration;
+            let pieces = concat_export::audio_pieces(&piece);
+            return (!pieces.is_empty()).then_some((
+                AudioMeterScope::Clip(id.clone()),
+                vec![id],
+                pieces,
+                duration,
+                project_dir,
+            ));
+        }
+
+        let timeline = self.timeline();
+        let targets: Vec<String> = timeline
+            .clips
+            .iter()
+            .filter(|clip| {
+                self.clip_has_sound(clip)
+                    && clip.muted != Some(true)
+                    && timeline
+                        .tracks
+                        .iter()
+                        .find(|track| track.id == clip.track_id)
+                        .is_none_or(|track| !track.muted)
+            })
+            .map(|clip| clip.id.clone())
+            .collect();
+        let flattened =
+            concat_export::flatten::flatten_timeline_in(self.project(), None, Some(&project_dir));
+        let pieces: Vec<_> = flattened
+            .iter()
+            .filter(|clip| {
+                !clip.muted
+                    && (clip.kind == concat_export::ClipKind::Audio
+                        || (clip.kind == concat_export::ClipKind::Video
+                            && clip.has_audio.unwrap_or(true)))
+            })
+            .flat_map(concat_export::audio_pieces)
+            .collect();
+        (!pieces.is_empty()).then_some((
+            AudioMeterScope::Mix(timeline.id.clone()),
+            targets,
+            pieces,
+            f64::from(self.duration()),
+            project_dir,
+        ))
+    }
+
+    fn audio_meter_context_is_current(&self) -> bool {
+        match self.audio_meter.context.as_ref() {
+            Some(AudioMeterScope::Clip(id)) => self.sole_selection().as_deref() == Some(id),
+            Some(AudioMeterScope::Mix(id)) => self.timeline().id == *id,
+            None => false,
+        }
+    }
+
+    /// Starts a non-blocking analysis of a selected clip or the final mix.
+    /// The temporary AAC is produced by the same mix function export uses,
+    /// so gain rides, fades, filters, speed and overlapping tracks are in
+    /// the signal that reaches `ebur128`.
+    pub fn audio_meter_analyse(&mut self, scope_index: i32) {
+        self.start_audio_meter(scope_index, false);
+    }
+
+    fn start_audio_meter(&mut self, scope_index: i32, after_normalization: bool) {
+        if self.audio_meter.busy {
+            return;
+        }
+        let Some((context, targets, pieces, duration, project_dir)) =
+            self.audio_meter_plan(scope_index)
+        else {
+            self.notify(&t("studio.clipHasNoSound"), true);
+            return;
+        };
+        self.audio_meter.job = self.audio_meter.job.wrapping_add(1);
+        let job = self.audio_meter.job;
+        let revision = self.revision;
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.audio_meter.scope_index = scope_index.clamp(0, 1);
+        self.audio_meter.context = Some(context);
+        self.audio_meter.targets = targets;
+        self.audio_meter.revision = revision;
+        self.audio_meter.busy = true;
+        self.audio_meter.progress = 0.0;
+        self.audio_meter.cancel = Some(Arc::clone(&cancel));
+        if !after_normalization {
+            self.audio_meter.before = None;
+            self.audio_meter.after = None;
+            self.audio_meter.message.clear();
+        }
+
+        let cache = project_dir.join("cache").join("audio-meter");
+        let file = cache.join(format!("meter-{job}.m4a"));
+        let epoch = crate::host::project_epoch();
+        spawn_in_project(
+            move || {
+                let result = (|| -> Result<_, String> {
+                    std::fs::create_dir_all(&cache).map_err(|error| {
+                        format!("could not create {}: {error}", cache.display())
+                    })?;
+                    let mut reporting = |value: f32| {
+                        on_ui_in_project(epoch, move |studio, _, _| {
+                            if studio.audio_meter.job == job && studio.audio_meter.busy {
+                                studio.audio_meter.progress = value * 0.55;
+                            }
+                        });
+                    };
+                    concat_media::audio::mix_to_file_with_control(
+                        &pieces,
+                        duration,
+                        &file,
+                        &cancel,
+                        &mut reporting,
+                    )
+                    .map_err(|error| error.to_string())?;
+                    let mut reporting = |value: f32| {
+                        on_ui_in_project(epoch, move |studio, _, _| {
+                            if studio.audio_meter.job == job && studio.audio_meter.busy {
+                                studio.audio_meter.progress = 0.55 + value * 0.45;
+                            }
+                        });
+                    };
+                    concat_media::audio_meter::analyse_file(&file, None, &cancel, &mut reporting)
+                        .map_err(|error| error.to_string())
+                })();
+                let _ = std::fs::remove_file(&file);
+                (job, revision, after_normalization, result)
+            },
+            |studio, _, _, (job, revision, after_normalization, result)| {
+                if studio.audio_meter.job != job {
+                    return;
+                }
+                studio.audio_meter.busy = false;
+                studio.audio_meter.progress = 0.0;
+                studio.audio_meter.cancel = None;
+                if studio.revision != revision || !studio.audio_meter_context_is_current() {
+                    studio.audio_meter.message = if i18n::current() == "es" {
+                        "La edición cambió; vuelve a analizar el audio.".to_owned()
+                    } else {
+                        "The edit changed; analyse the audio again.".to_owned()
+                    };
+                    return;
+                }
+                match result {
+                    Ok(measurement) if after_normalization => {
+                        studio.audio_meter.after = Some(measurement);
+                        let target = studio.audio_meter.target;
+                        let hit_loudness = measurement
+                            .integrated_lufs
+                            .is_some_and(|value| (value - target.integrated_lufs).abs() <= 0.5);
+                        let safe_peak = measurement
+                            .true_peak_dbtp
+                            .is_none_or(|value| value <= target.max_true_peak_dbtp + 0.1);
+                        let suffix = if hit_loudness && safe_peak {
+                            if i18n::current() == "es" {
+                                "Resultado verificado en el audio renderizado."
+                            } else {
+                                "Result verified on rendered audio."
+                            }
+                        } else if i18n::current() == "es" {
+                            "El audio renderizado no alcanzó simultáneamente los objetivos LUFS y dBTP."
+                        } else {
+                            "The rendered audio did not meet both the LUFS and dBTP targets."
+                        };
+                        if !studio.audio_meter.message.is_empty() {
+                            studio.audio_meter.message.push(' ');
+                        }
+                        studio.audio_meter.message.push_str(suffix);
+                    }
+                    Ok(measurement) => studio.audio_meter.before = Some(measurement),
+                    Err(error) if error.contains("cancelled") => {
+                        studio.audio_meter.message = if i18n::current() == "es" {
+                            "Análisis cancelado.".to_owned()
+                        } else {
+                            "Analysis cancelled.".to_owned()
+                        };
+                    }
+                    Err(error) => {
+                        studio.audio_meter.message = error.clone();
+                        studio.notify(&error, true);
+                    }
+                }
+            },
+        );
+    }
+
+    pub fn audio_meter_cancel(&mut self) {
+        if let Some(cancel) = self.audio_meter.cancel.as_ref() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+
+    pub fn audio_meter_target(&mut self, integrated_lufs: f32, max_true_peak_dbtp: f32) {
+        self.audio_meter.target.integrated_lufs = f64::from(integrated_lufs).clamp(-70.0, -5.0);
+        self.audio_meter.target.max_true_peak_dbtp = f64::from(max_true_peak_dbtp).clamp(-9.0, 0.0);
+        self.audio_meter.after = None;
+    }
+
+    pub fn audio_meter_mode(&mut self, mode: i32) {
+        self.audio_meter.mode = if mode == 1 {
+            concat_media::audio_meter::NormalizationMode::AttenuateOnly
+        } else {
+            concat_media::audio_meter::NormalizationMode::LoudnessAndPeak
+        };
+        self.audio_meter.after = None;
+    }
+
+    /// Applies one constant gain to the analysed branches. A volume ride's
+    /// keys are multiplied too; all commands are wrapped in one Batch, so
+    /// undo restores every prior scalar/key atomically.
+    pub fn audio_meter_apply(&mut self) {
+        if self.audio_meter.busy
+            || self.audio_meter.revision != self.revision
+            || !self.audio_meter_context_is_current()
+        {
+            return;
+        }
+        let Some(before_measurement) = self.audio_meter.before else {
+            return;
+        };
+        let Some(plan) = concat_media::audio_meter::NormalizationPlan::from_measurement_with_mode(
+            before_measurement,
+            self.audio_meter.target,
+            self.audio_meter.mode,
+        ) else {
+            self.audio_meter.message = if i18n::current() == "es" {
+                "El silencio no tiene LUFS integrados que normalizar.".to_owned()
+            } else {
+                "Silence has no integrated LUFS to normalize.".to_owned()
+            };
+            return;
+        };
+        let gain = plan.linear_gain();
+        let clips: Vec<Clip> = self
+            .audio_meter
+            .targets
+            .clone()
+            .iter()
+            .filter_map(|id| self.clip(id).cloned())
+            .collect();
+        if clips.is_empty() {
+            self.audio_meter.after = Some(before_measurement);
+            return;
+        }
+        self.audio_meter.message = if plan.target_reachable {
+            format!(
+                "{:+.1} dB {}",
+                plan.applied_gain_db,
+                if i18n::current() == "es" {
+                    "aplicados."
+                } else {
+                    "applied."
+                }
+            )
+        } else {
+            format!(
+                "{:+.1} dB {}",
+                plan.applied_gain_db,
+                if i18n::current() == "es" {
+                    if plan.limited_by_mode {
+                        "aplicados; el modo solo atenuar evita amplificar."
+                    } else {
+                        "aplicados; el techo dBTP limita el objetivo LUFS."
+                    }
+                } else {
+                    if plan.limited_by_mode {
+                        "applied; attenuate-only mode prevents amplification."
+                    } else {
+                        "applied; the dBTP ceiling limits the LUFS target."
+                    }
+                }
+            )
+        };
+        self.apply(concat_project::normalize_clip_gain(&clips, gain));
+        self.start_audio_meter(self.audio_meter.scope_index, true);
+    }
+
     /// Writes one clip's sound as it plays - trimmed, at its speed, with its
     /// level, fades and effects baked in - to a WAV in the project's audio
     /// folder, and puts the file in the bin under Generated › Processed. A
@@ -8599,6 +8952,8 @@ impl Studio {
     /// Lets the open project go, unsaved: what `close_project` does once
     /// the save has landed, and what quitting without saving does instead.
     fn release_project(&mut self) {
+        self.audio_meter_cancel();
+        self.audio_meter = AudioMeterState::default();
         self.host.cutouts.cancel();
         self.host.stabilizers.cancel();
         self.host.enhancers.cancel();
@@ -9279,6 +9634,47 @@ impl Studio {
 
         editor.set_selected_clip(self.selected());
         editor.set_selected_transition(self.selected_transition_data());
+        let meter = &self.audio_meter;
+        let reading = |value: Option<f64>| value.unwrap_or(-200.0) as f32;
+        editor.set_audio_meter_scope(meter.scope_index);
+        editor.set_audio_meter_busy(meter.busy);
+        editor.set_audio_meter_valid(
+            meter.before.is_some()
+                && meter.revision == self.revision
+                && self.audio_meter_context_is_current(),
+        );
+        editor.set_audio_meter_progress(meter.progress);
+        editor.set_audio_meter_target_lufs(meter.target.integrated_lufs as f32);
+        editor.set_audio_meter_target_dbtp(meter.target.max_true_peak_dbtp as f32);
+        editor.set_audio_meter_mode(match meter.mode {
+            concat_media::audio_meter::NormalizationMode::LoudnessAndPeak => 0,
+            concat_media::audio_meter::NormalizationMode::AttenuateOnly => 1,
+        });
+        editor.set_audio_meter_i(reading(
+            meter.before.and_then(|value| value.integrated_lufs),
+        ));
+        editor.set_audio_meter_m(reading(
+            meter.before.and_then(|value| value.max_momentary_lufs),
+        ));
+        editor.set_audio_meter_s(reading(
+            meter.before.and_then(|value| value.max_short_term_lufs),
+        ));
+        editor.set_audio_meter_lra(reading(
+            meter.before.and_then(|value| value.loudness_range_lu),
+        ));
+        editor.set_audio_meter_true_peak(reading(
+            meter.before.and_then(|value| value.true_peak_dbtp),
+        ));
+        editor.set_audio_meter_sample_peak(reading(
+            meter.before.and_then(|value| value.sample_peak_dbfs),
+        ));
+        editor.set_audio_meter_clipped(meter.before.is_some_and(|value| value.clipped()));
+        editor
+            .set_audio_meter_after_i(reading(meter.after.and_then(|value| value.integrated_lufs)));
+        editor.set_audio_meter_after_true_peak(reading(
+            meter.after.and_then(|value| value.true_peak_dbtp),
+        ));
+        editor.set_audio_meter_message(meter.message.as_str().into());
         // The background and Fit and Fill, on their own global: the Details
         // panel, the Video panel and the phone all read it.
         self.publish_backdrop(app);

@@ -11,7 +11,7 @@ import {
     SectionBody,
     SectionHeader,
 } from "../primitives/panel.slint";
-import { Button } from "../primitives/modal.slint";
+import { Button, Progress } from "../primitives/modal.slint";
 import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { Select } from "../primitives/select.slint";
 import {
@@ -2560,6 +2560,148 @@ export component AudioPanel inherits VerticalLayout {
                     root.set(ClipField.preserve-pitch, on ? 0 : 1);
                     root.commit();
                 }
+            }
+        }
+    }
+}
+
+/// Offline EBU R128 analysis of the exact signal produced by the export
+/// mixer. The values are readouts only; Apply writes one ordinary, undoable
+/// gain command and the post pass measures the rendered result again.
+export component AudioMeterPanel inherits VerticalLayout {
+    in property <int> scope;
+    in property <bool> busy;
+    in property <bool> valid;
+    in property <float> progress;
+    in property <float> target-lufs;
+    in property <float> target-dbtp;
+    in property <int> mode;
+    in property <float> integrated: -200;
+    in property <float> momentary: -200;
+    in property <float> short-term: -200;
+    in property <float> lra: -200;
+    in property <float> true-peak: -200;
+    in property <float> sample-peak: -200;
+    in property <bool> clipped;
+    in property <float> after-integrated: -200;
+    in property <float> after-true-peak: -200;
+    in property <string> message;
+
+    callback analyse(scope: int);
+    callback cancel();
+    callback target-changed(integrated-lufs: float, max-true-peak-dbtp: float);
+    callback mode-changed(mode: int);
+    callback apply();
+
+    property <int> chosen-scope: root.scope;
+    property <float> draft-lufs: root.target-lufs;
+    property <float> draft-dbtp: root.target-dbtp;
+    property <int> chosen-mode: root.mode;
+
+    Section {
+        meter := SectionHeader {
+            title: I18n.lang == "es" ? "Medición profesional" : "Professional metering";
+            collapsible: true;
+            summary: root.integrated > -100
+                ? InspectorFmt.fixed1(root.integrated) + " LUFS · "
+                    + InspectorFmt.fixed1(root.true-peak) + " dBTP"
+                : "";
+        }
+        if meter.open: SectionBody {
+            SegmentedControl {
+                options: I18n.lang == "es" ? ["Clip", "Mezcla final"] : ["Clip", "Final mix"];
+                current <=> root.chosen-scope;
+            }
+
+            if root.busy: VerticalLayout {
+                spacing: 6px;
+                Progress {
+                    value: root.progress;
+                    live: true;
+                }
+                Row {
+                    label: "\{Math.round(root.progress * 100)}%";
+                    Button {
+                        label: I18n.lang == "es" ? "Cancelar" : "Cancel";
+                        danger: true;
+                        clicked => { root.cancel(); }
+                    }
+                }
+            }
+
+            if !root.busy: Button {
+                label: I18n.lang == "es" ? "Analizar señal renderizada" : "Analyse rendered signal";
+                block: true;
+                primary: root.integrated <= -100 || !root.valid;
+                clicked => { root.analyse(root.chosen-scope); }
+            }
+
+            if root.integrated > -100: Note {
+                text: "I " + InspectorFmt.fixed1(root.integrated) + " LUFS   "
+                    + "M max " + (root.momentary > -100 ? InspectorFmt.fixed1(root.momentary) : "—") + " LUFS\n"
+                    + "S max " + (root.short-term > -100 ? InspectorFmt.fixed1(root.short-term) : "—") + " LUFS   "
+                    + "LRA " + (root.lra > -100 ? InspectorFmt.fixed1(root.lra) : "—") + " LU\n"
+                    + "True-peak " + (root.true-peak > -100 ? InspectorFmt.fixed1(root.true-peak) : "—") + " dBTP   "
+                    + "Sample " + (root.sample-peak > -100 ? InspectorFmt.fixed1(root.sample-peak) : "—") + " dBFS"
+                    + (root.clipped ? (I18n.lang == "es" ? "\n⚠ Clipping detectado" : "\n⚠ Clipping detected") : "");
+            }
+
+            Param {
+                label: I18n.lang == "es" ? "Objetivo integrado" : "Integrated target";
+                value <=> root.draft-lufs;
+                minimum: -30;
+                maximum: -5;
+                step: 0.5;
+                default-value: -16;
+                fmt: ParamFormat.plain;
+                unit: "LUFS";
+                changed(v) => {
+                    root.target-changed(v, root.draft-dbtp);
+                }
+            }
+
+            Param {
+                label: "True-peak máx.";
+                value <=> root.draft-dbtp;
+                minimum: -9;
+                maximum: 0;
+                step: 0.1;
+                default-value: -1;
+                fmt: ParamFormat.plain;
+                unit: "dBTP";
+                changed(v) => {
+                    root.target-changed(root.draft-lufs, v);
+                }
+            }
+
+            Row {
+                label: I18n.lang == "es" ? "Modo" : "Mode";
+                Select {
+                    options: I18n.lang == "es"
+                        ? ["LUFS + límite dBTP", "Solo atenuar"]
+                        : ["LUFS + dBTP limit", "Attenuate only"];
+                    current <=> root.chosen-mode;
+                    changed(index) => { root.mode-changed(index); }
+                }
+            }
+
+            Button {
+                label: I18n.lang == "es" ? "Aplicar normalización" : "Apply normalization";
+                block: true;
+                enabled: root.valid && root.integrated > -100 && !root.busy;
+                clicked => { root.apply(); }
+            }
+
+            if root.after-integrated > -100: Note {
+                text: (I18n.lang == "es" ? "Después: " : "After: ")
+                    + InspectorFmt.fixed1(root.after-integrated) + " LUFS · "
+                    + InspectorFmt.fixed1(root.after-true-peak) + " dBTP";
+            }
+            if root.message != "": Note { text: root.message; }
+            if root.integrated > -100 && !root.valid && !root.busy: Note {
+                text: I18n.lang == "es"
+                    ? "La medición quedó obsoleta porque cambió el audio o la selección."
+                    : "The measurement is stale because the audio or selection changed.";
             }
         }
     }

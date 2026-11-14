@@ -14,6 +14,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// you will ask six months from now is "which file, and what did FFmpeg say".
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// A long media operation was cancelled by its caller.
+    #[error("media operation cancelled")]
+    Cancelled,
+
     /// A libav* call failed.
     #[error("{operation} failed for {path}: {detail}")]
     Ffi {

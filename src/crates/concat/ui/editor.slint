@@ -221,6 +221,31 @@ export global Editor {
     callback chain-remove(audio: bool, index: int);
     callback chain-set-param(audio: bool, index: int, key: string, value: float);
 
+    // Offline measurement of the exact rendered clip/final mix. A value at
+    // -200 means the standard has no reading (silence / window too short).
+    in-out property <int> audio-meter-scope;
+    in-out property <bool> audio-meter-busy;
+    in-out property <bool> audio-meter-valid;
+    in-out property <float> audio-meter-progress;
+    in-out property <float> audio-meter-target-lufs: -16;
+    in-out property <float> audio-meter-target-dbtp: -1;
+    in-out property <int> audio-meter-mode;
+    in-out property <float> audio-meter-i: -200;
+    in-out property <float> audio-meter-m: -200;
+    in-out property <float> audio-meter-s: -200;
+    in-out property <float> audio-meter-lra: -200;
+    in-out property <float> audio-meter-true-peak: -200;
+    in-out property <float> audio-meter-sample-peak: -200;
+    in-out property <bool> audio-meter-clipped;
+    in-out property <float> audio-meter-after-i: -200;
+    in-out property <float> audio-meter-after-true-peak: -200;
+    in-out property <string> audio-meter-message;
+    callback audio-meter-analyse(scope: int);
+    callback audio-meter-cancel();
+    callback audio-meter-set-target(integrated-lufs: float, max-true-peak-dbtp: float);
+    callback audio-meter-set-mode(mode: int);
+    callback audio-meter-apply();
+
     in-out property <[EffectData]> video-effects;
     in-out property <[EffectData]> audio-effects;
     in-out property <float> level;

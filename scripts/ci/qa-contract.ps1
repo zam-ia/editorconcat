@@ -1,8 +1,12 @@
 param(
-  [switch]$SkipExport
+  [switch]$SkipExport,
+  [switch]$SkipUi
 )
 
-$ErrorActionPreference = "Stop"
+# Windows PowerShell 5 wraps ordinary Cargo stderr progress as a
+# NativeCommandError when Stop is active. Native failures are checked through
+# LASTEXITCODE below; real script failures still use throw/exit explicitly.
+$ErrorActionPreference = "Continue"
 $env:CARGO_BUILD_JOBS = "1"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $cargoRoot = Join-Path $root "src"
@@ -42,31 +46,70 @@ if ($cmake) {
   $env:PATH = "$(Split-Path -Parent $cmakePath);$env:PATH"
 }
 
-$contracts = @(
-  [pscustomobject]@{
+function Test-ContractEvidence {
+  param(
+    [string[]]$Output,
+    [string]$ExpectedTest
+  )
+  $text = $Output -join "`n"
+  $positiveRun = [regex]::IsMatch($text, '(?m)^running\s+[1-9][0-9]*\s+tests?\s*$')
+  $escaped = [regex]::Escape($ExpectedTest)
+  $expectedPassed = [regex]::IsMatch($text, "(?m)^test .*${escaped}.* \.\.\. ok\s*$")
+  return $positiveRun -and $expectedPassed
+}
+
+# Cargo returns success when a filter matches zero tests. Keep a direct guard
+# on the parser so a future output/refactor cannot silently turn every
+# contract green without executing its named test.
+if (Test-ContractEvidence @('running 0 tests', 'test result: ok. 0 passed') 'missing_test') {
+  throw 'QA evidence parser accepted a zero-test run'
+}
+
+$contracts = @()
+if (-not $SkipUi) {
+  $contracts += [pscustomobject]@{
     Id = "fill-reset-atomic"
     Dimensions = "processing,undo-redo,persistence"
+    ExpectedTest = "shape_fill_reset_is_one_atomic_undo_step"
     Args = @("test", "-p", "concat", "--lib", "shape_fill_reset_is_one_atomic_undo_step", "--", "--nocapture")
-  },
+  }
+}
+$contracts += @(
   [pscustomobject]@{
     Id = "project-history"
     Dimensions = "undo-redo"
+    ExpectedTest = "undo_and_redo_walk_the_history"
     Args = @("test", "-p", "concat-project", "undo_and_redo_walk_the_history")
   },
   [pscustomobject]@{
     Id = "project-round-trip"
     Dimensions = "persistence"
+    ExpectedTest = "the_document_round_trips"
     Args = @("test", "-p", "concat-project", "the_document_round_trips")
   },
   [pscustomobject]@{
     Id = "project-0.2-compatibility"
     Dimensions = "backward-compatibility"
+    ExpectedTest = "a_legacy_flat_document_loads_as_one_timeline"
     Args = @("test", "-p", "concat-project", "a_legacy_flat_document_loads_as_one_timeline")
   },
   [pscustomobject]@{
     Id = "session-save-reopen"
     Dimensions = "persistence,backward-compatibility"
+    ExpectedTest = "a_fresh_project_opens_empty_and_round_trips_a_save"
     Args = @("test", "-p", "concat-host", "a_fresh_project_opens_empty_and_round_trips_a_save")
+  },
+  [pscustomobject]@{
+    Id = "audio-normalization-atomic"
+    Dimensions = "processing,undo-redo,persistence"
+    ExpectedTest = "audio_normalization_is_one_atomic_undo_step_and_persists"
+    Args = @("test", "-p", "concat-project", "audio_normalization_is_one_atomic_undo_step_and_persists", "--", "--nocapture")
+  },
+  [pscustomobject]@{
+    Id = "audio-meter-export-reference"
+    Dimensions = "processing,preview-export-match,export"
+    ExpectedTest = "rendered_mix_normalization_matches_the_export_signal"
+    Args = @("test", "-p", "concat-media", "--lib", "rendered_mix_normalization_matches_the_export_signal", "--", "--nocapture")
   }
 )
 
@@ -75,11 +118,13 @@ if (-not $SkipExport) {
     [pscustomobject]@{
       Id = "preview-export-parity"
       Dimensions = "processing,preview-export-match"
+      ExpectedTest = "a_background_fills_the_bars_in_the_export_and_the_monitor"
       Args = @("test", "-p", "concat-host", "--test", "export", "a_background_fills_the_bars_in_the_export_and_the_monitor", "--", "--nocapture")
     },
     [pscustomobject]@{
       Id = "audiovisual-export-regression"
       Dimensions = "processing,export"
+      ExpectedTest = "every_edit_still_exports"
       Args = @("test", "-p", "concat-host", "--test", "export", "every_edit_still_exports", "--", "--nocapture")
     }
   )
@@ -91,12 +136,18 @@ try {
   foreach ($contract in $contracts) {
     $started = Get-Date
     Write-Host "[QA] $($contract.Id): $($contract.Dimensions)"
-    & cargo @($contract.Args)
+    $output = @(& cargo @($contract.Args) 2>&1 | Tee-Object -Variable contractOutput)
     $code = $LASTEXITCODE
+    $evidence = Test-ContractEvidence $output $contract.ExpectedTest
+    if ($code -eq 0 -and -not $evidence) {
+      Write-Error "[QA] $($contract.Id) returned success but did not execute expected test '$($contract.ExpectedTest)'" -ErrorAction Continue
+      $code = 97
+    }
     $results += [pscustomobject]@{
       Contract = $contract.Id
       Dimensions = $contract.Dimensions
       Result = if ($code -eq 0) { "PASS" } else { "FAIL ($code)" }
+      Evidence = if ($evidence) { $contract.ExpectedTest } else { "missing" }
       Seconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
     }
     if ($code -ne 0) {

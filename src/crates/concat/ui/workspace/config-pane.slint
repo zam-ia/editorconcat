@@ -8,7 +8,7 @@ import { Pane, PaneBody, PaneScroll } from "pane.slint";
 import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
 import { EffectData } from "../demo/effects-panel.slint";
 import {
-    AdjustPanel, AnimationPanel, AppliedEntryData, AppliedParamData, AudioPanel, BackgroundRows,
+    AdjustPanel, AnimationPanel, AppliedEntryData, AppliedParamData, AudioMeterPanel, AudioPanel, BackgroundRows,
     ProcessorRows, CatalogueEntryData, ColourKnobData, EnhancePanel, FilterPanel, PresetStack,
     SpeedPanel, TransitionPanel, VideoPanel,
 } from "../inspector/clip-inspector.slint";
@@ -183,6 +183,29 @@ export component ConfigPane inherits Rectangle {
     callback chain-move-by(audio: bool, index: int, delta: int);
     callback chain-remove(audio: bool, index: int);
     callback chain-set-param(audio: bool, index: int, key: string, value: float);
+
+    in property <int> audio-meter-scope;
+    in property <bool> audio-meter-busy;
+    in property <bool> audio-meter-valid;
+    in property <float> audio-meter-progress;
+    in property <float> audio-meter-target-lufs;
+    in property <float> audio-meter-target-dbtp;
+    in property <int> audio-meter-mode;
+    in property <float> audio-meter-i;
+    in property <float> audio-meter-m;
+    in property <float> audio-meter-s;
+    in property <float> audio-meter-lra;
+    in property <float> audio-meter-true-peak;
+    in property <float> audio-meter-sample-peak;
+    in property <bool> audio-meter-clipped;
+    in property <float> audio-meter-after-i;
+    in property <float> audio-meter-after-true-peak;
+    in property <string> audio-meter-message;
+    callback audio-meter-analyse(scope: int);
+    callback audio-meter-cancel();
+    callback audio-meter-set-target(integrated-lufs: float, max-true-peak-dbtp: float);
+    callback audio-meter-set-mode(mode: int);
+    callback audio-meter-apply();
 
     callback clip-set(field: ClipField, value: float);
     callback clip-set-text(field: ClipTextField, value: string);
@@ -723,6 +746,32 @@ export component ConfigPane inherits Rectangle {
                         audio-tracks: root.audio-tracks;
                         set(field, value) => { root.clip-set(field, value); }
                         commit => { root.clip-commit(); }
+                    }
+                    AudioMeterPanel {
+                        scope: root.audio-meter-scope;
+                        busy: root.audio-meter-busy;
+                        valid: root.audio-meter-valid;
+                        progress: root.audio-meter-progress;
+                        target-lufs: root.audio-meter-target-lufs;
+                        target-dbtp: root.audio-meter-target-dbtp;
+                        mode: root.audio-meter-mode;
+                        integrated: root.audio-meter-i;
+                        momentary: root.audio-meter-m;
+                        short-term: root.audio-meter-s;
+                        lra: root.audio-meter-lra;
+                        true-peak: root.audio-meter-true-peak;
+                        sample-peak: root.audio-meter-sample-peak;
+                        clipped: root.audio-meter-clipped;
+                        after-integrated: root.audio-meter-after-i;
+                        after-true-peak: root.audio-meter-after-true-peak;
+                        message: root.audio-meter-message;
+                        analyse(scope) => { root.audio-meter-analyse(scope); }
+                        cancel => { root.audio-meter-cancel(); }
+                        target-changed(integrated-lufs, max-true-peak-dbtp) => {
+                            root.audio-meter-set-target(integrated-lufs, max-true-peak-dbtp);
+                        }
+                        mode-changed(mode) => { root.audio-meter-set-mode(mode); }
+                        apply => { root.audio-meter-apply(); }
                     }
                     // The three treatments, between the mix and the library:
                     // they are chain links like any other, but they are the

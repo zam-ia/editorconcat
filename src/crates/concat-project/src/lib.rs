@@ -31,7 +31,7 @@ pub mod srt;
 
 pub use commands::{
     Command, CommandError, Outcome, PlayheadSide, consolidation_clips, delete_to_playhead,
-    why_not_merge,
+    normalize_clip_gain, why_not_merge,
 };
 pub use doc::{DOCUMENT_VERSION, DocumentSettings, document_version, from_document, to_document};
 pub use editor::{Editor, RetiredFields};
@@ -5204,6 +5204,65 @@ mod tests {
         let gone = ["nobody".to_owned()];
         assert!(
             crate::delete_to_playhead(timeline, &gone, 5.0, PlayheadSide::Left, false).is_none()
+        );
+    }
+
+    /// P1 contract: production's normalization command is one undo step,
+    /// scales scalar/automated gain together, redoes exactly and survives
+    /// the unchanged 0.2.x document writer/reader.
+    #[test]
+    fn audio_normalization_is_one_atomic_undo_step_and_persists() {
+        use crate::model::{KeyEase, KeyProperty};
+        let (mut editor, _media_id, clip_id) = fixture();
+        for (at, value) in [(0.0, 0.25), (2.0, 0.5)] {
+            editor
+                .apply(Command::SetClipKey {
+                    clip_id: clip_id.clone(),
+                    property: KeyProperty::Volume,
+                    at,
+                    value,
+                    ease: KeyEase::LINEAR,
+                })
+                .expect("sets volume automation");
+        }
+        editor.end_gesture();
+        let before = editor
+            .project()
+            .active()
+            .clip(&clip_id)
+            .expect("clip")
+            .clone();
+        editor
+            .apply(crate::normalize_clip_gain(
+                std::slice::from_ref(&before),
+                2.0,
+            ))
+            .expect("normalizes atomically");
+        let normalized = editor
+            .project()
+            .active()
+            .clip(&clip_id)
+            .expect("normalized clip")
+            .clone();
+        assert_eq!(normalized.volume, before.volume * 2.0);
+        assert_eq!(
+            normalized
+                .keys_on(KeyProperty::Volume)
+                .map(|key| key.value)
+                .collect::<Vec<_>>(),
+            vec![0.5, 1.0]
+        );
+
+        assert!(editor.undo(), "one undo restores the complete ride");
+        assert_eq!(editor.project().active().clip(&clip_id), Some(&before));
+        assert!(editor.redo(), "one redo reapplies the complete ride");
+        assert_eq!(editor.project().active().clip(&clip_id), Some(&normalized));
+
+        let document = editor.to_document(&settings());
+        let reopened = Editor::from_document(&document).expect("reopens project");
+        assert_eq!(
+            reopened.project().active().clip(&clip_id),
+            Some(&normalized)
         );
     }
 }

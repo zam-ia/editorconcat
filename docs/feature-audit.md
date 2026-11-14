@@ -1,4 +1,4 @@
-# Auditoría funcional P0 de Concat Studio
+# Auditoría funcional P0–P1 de Concat Studio
 
 **Fecha:** 13 de noviembre de 2026
 **Base examinada:** EditorConcat sobre Concat 0.2.8  
@@ -36,10 +36,19 @@ para que el gran test binario de Slint/Skia no se enlace dos veces en paralelo.
 | Paridad de fondo | Sí: render y decode del archivo exportado | N/A | Fondo en documento | Sí: monitor y export | Sí | `concat_host/tests/export.rs::a_background_fills_the_bars_in_the_export_and_the_monitor` | **PASS P0.1** |
 | Regresión audiovisual | Sí: 35 estados exportados y leídos | Incluye estado deshecho | Sí, a través del documento editado | Sí, H.264 leído después del encode | Incluye timeline alterna y FPS racional | `concat_host/tests/export.rs::every_edit_still_exports` | **PASS P0.1** |
 
-La corrida completa terminó con **7/7 contratos PASS**. `every_edit_still_exports`
+La corrida P0.1 terminó con **7/7 contratos PASS**. El runner P1 añade dos
+contratos que además rechazan explícitamente una coincidencia de cero tests:
+normalización atómica y medición del archivo de mezcla renderizado.
+`every_edit_still_exports`
 verificó 35 estados: split, trims, movimientos, velocidades, undo, freeze,
 transiciones, efectos y keys, crop/blend/fades, títulos, forma degradada, audio
 separado/reunido, mute/visible, 60/1, 30000/1001, 24/1 y segunda timeline.
+
+La corrida P1 del 13-11-2026 ejecutó **8/8 contratos PASS** con `-SkipUi`:
+los seis contratos headless/proyecto y los dos de exportación audiovisual. El
+reset visual de relleno no se volvió a enlazar localmente porque el test monolítico
+Slint/Skia excedió 30 minutos en el linker MSVC; su evidencia P0.1 permanece PASS
+y `cargo check -p concat` sí verificó toda la UI modificada en esta rama.
 
 ## Mapa de responsabilidades real
 
@@ -100,7 +109,7 @@ stack actual sin una justificación adicional.
 | Scopes | Ausente | — | — | — | N/A | No se encontró waveform/parade/vectorscope de color | Requiere módulo de análisis, UI y presupuesto GPU/CPU |
 | Volumen en dB y fades | Probado | Gain lineal persistido, UI logarítmica; fades reales | Sí | Sí | Sí | inspector, mix y export tests | Curvas de fade seleccionables no están completas |
 | Denoise/mejora de voz | Parcial | Cadena DSP/FFmpeg y módulos locales | Sí | Sí | Sí | paquetes y host jobs | Falta suite cuantitativa 0/50/100, latencia y artefactos por modo |
-| Normalización LUFS | Parcial | Filtro/acción disponible | Sí | Sí | Sí | catálogo/inspector | Falta reporte antes/después y prueba independiente de LUFS/true peak |
+| Normalización LUFS | Probado | EBU R128 sobre mezcla renderizada; ganancia constante limitada por dBTP | Sí, usando volumen/keys existentes | Sí | Sí | `rendered_mix_normalization_matches_the_export_signal`; `audio_normalization_is_one_atomic_undo_step_and_persists` | Medición offline, no medidor en vivo; aún no hay buses |
 | Mezclador, buses y ducking | Parcial | Mezcla por clips/pistas; helpers de música/voz | Sí | Sí | Sí | playback/export/sounds | No hay mezclador completo A1–An con buses, solo, plugins y automatización |
 | Export H.264/AAC | Probado | Render/encode cancelable y lectura de resultado | N/A | Mismo plan | Sí | `concat-host/tests/export.rs` | Cola/pausa/stems y matriz completa de codecs dependen de capacidades |
 | Export 4K/FPS/configuración | Funcional | Resolución y tasa configurables | Preset/proyecto | N/A | Sí | diálogo y exporter | Rendimiento/codec depende de hardware; falta benchmark visible por equipo |
@@ -116,8 +125,8 @@ stack actual sin una justificación adicional.
    matriz que impida declarar una función terminada sin save/reopen/undo/export. Este documento se
    convierte en la fuente inicial y debe actualizarse por slice.
 3. **P1 — scopes de color:** son la ausencia profesional más clara del panel de grading.
-4. **P1 — audio profesional:** faltan buses, solo, routing y medición LUFS/true-peak verificable,
-   aunque el gain, fades y la cadena de procesamiento básica sí son reales.
+4. **P1 — audio profesional:** la medición LUFS/true-peak offline y la normalización verificable
+   quedan cerradas en este slice. Siguen pendientes buses, solo y routing profesional.
 5. **P1 — proxy UX:** el proxy automático funciona y exporta con originales, pero no ofrece la
    elección Completa/1/2/1/4 exigida.
 6. **P1 — operaciones avanzadas de timeline:** slip/slide/rolling y sync-lock necesitan diseño y
@@ -153,10 +162,32 @@ Esta entrega cierra el hallazgo 7 sin crear una función decorativa:
 
 1. **QA contractual automatizado:** tabla ejecutable que enlace funciones con pruebas reales.
 2. **Proxy quality:** selector Completa/1/2/1/4, persistencia y prueba export-original.
-3. **Audio metering:** LUFS/true peak antes/después para normalización, sin añadir otro toggle.
+3. **Audio mixer:** buses, solo, routing y automatización de pista sobre la medición ya cerrada.
 4. **Scopes P1:** histograma y waveform Luma primero; RGB Parade y vectorscope después.
 5. **Timeline profesional:** implementar rolling edit como comando transaccional antes de UI.
 6. **Timing P0:** diseñar migración gradual a ticks racionales sin romper documentos 0.2.x.
 
 Cada slice debe actualizar esta matriz y aportar las cuatro pruebas mínimas: cambio medible,
 undo/redo, save/reopen y coincidencia de exportación.
+
+## Slice P1 — medición y normalización profesional
+
+- Analiza clips o mezcla final después de volumen, automatización, fades, filtros y suma.
+- Expone LUFS integrados, momentáneos y de corto plazo, LRA, sample peak dBFS, true-peak dBTP
+  y clipping sin confundir máximo de muestra con pico reconstruido.
+- Ofrece objetivo editable (preset inicial −16 LUFS / −1 dBTP) y modos **LUFS + límite dBTP**
+  y **Solo atenuar**.
+- Ejecuta mezcla y análisis fuera del hilo Slint, con progreso, cancelación e invalidación al
+  cambiar el sonido, revisión o selección.
+- Aplica una sola operación transaccional a escalares y curvas de volumen, permite undo/redo,
+  conserva el esquema 0.2.x y vuelve a medir el archivo resultante.
+
+| Contrato P1 | Procesamiento | Undo/redo | Persistencia | Exportación real | Evidencia |
+|---|---|---|---|---|---|
+| Medidor de referencia | Mezcla multipista con gain, fades y filtro | N/A | N/A | AAC generado y decodificado de vuelta | `rendered_mix_normalization_matches_the_export_signal` |
+| Normalización atómica | Gain aplicado a constante y ride | Un undo/redo para todo | Round-trip sin campo nuevo | Reanálisis automático posterior | `audio_normalization_is_one_atomic_undo_step_and_persists` |
+| Señales patrón | Silencio, seno mono/estéreo, 44.1/48 kHz e inter-sample peak | N/A | N/A | Decodificación FFmpeg real | tests de `concat_media::audio_meter` |
+| Cancelación | Mezcla y análisis cooperativos | No crea edición | N/A | Trabajo abortable | `a_cancelled_analysis_mix_stops_before_creating_output`; `cancellation_is_observed_before_decode` |
+
+La arquitectura, tolerancias, valores de referencia y limitaciones están documentados en
+`docs/audio-metering.md`.

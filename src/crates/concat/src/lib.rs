@@ -1282,6 +1282,24 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         }
     ));
 
+    editor.on_audio_meter_analyse(on_window!(|state, scope: i32| {
+        state.audio_meter_analyse(scope);
+    }));
+    editor.on_audio_meter_cancel(on_window!(|state| {
+        state.audio_meter_cancel();
+    }));
+    editor.on_audio_meter_set_target(on_window!(
+        |state, integrated_lufs: f32, max_true_peak_dbtp: f32| {
+            state.audio_meter_target(integrated_lufs, max_true_peak_dbtp);
+        }
+    ));
+    editor.on_audio_meter_set_mode(on_window!(|state, mode: i32| {
+        state.audio_meter_mode(mode);
+    }));
+    editor.on_audio_meter_apply(on_window!(|state| {
+        state.audio_meter_apply();
+    }));
+
     editor.on_chain_set_colour(on_lanes!(
         |state, index: i32, key: SharedString, value: slint::Color| {
             state.chain_set_colour(index, key.as_str(), value);

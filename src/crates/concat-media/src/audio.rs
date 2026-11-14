@@ -13,6 +13,7 @@
 //! `Clip::source_time_at` is the one definition for picture.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use concat_core::animate::Track;
 use concat_core::time::Rational;
@@ -369,6 +370,30 @@ impl MixInput {
 ///
 /// Every clip's file must contain an audio stream; see [`mix_graph`].
 pub fn mix_to_file(clips: &[AudioClip], duration: f64, destination: &Path) -> Result<()> {
+    mix_to_file_with_control(
+        clips,
+        duration,
+        destination,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+}
+
+/// [`mix_to_file`] with cooperative cancellation and monotonic progress.
+///
+/// The callback runs on the calling thread. A cancelled output may be an
+/// incomplete container; callers that create a temporary analysis mix must
+/// remove it, while the ordinary exporter continues to use `mix_to_file`.
+pub fn mix_to_file_with_control(
+    clips: &[AudioClip],
+    duration: f64,
+    destination: &Path,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(f32),
+) -> Result<()> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(Error::Cancelled);
+    }
     ffi::init();
     // A bad chain is refused before any file is opened.
     for clip in clips {
@@ -386,6 +411,9 @@ pub fn mix_to_file(clips: &[AudioClip], duration: f64, destination: &Path) -> Re
     let mut leads: Vec<f64> = Vec::with_capacity(clips.len());
     let mut graph = filter::Graph::new();
     for (index, clip) in clips.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Error::Cancelled);
+        }
         let path = clip.path.as_path();
         let mut input =
             ffmpeg::format::input(path).map_err(|error| ffi::fail("open", path, error))?;
@@ -548,6 +576,7 @@ pub fn mix_to_file(clips: &[AudioClip], duration: f64, destination: &Path) -> Re
     // whole of the decision, and the last frame is shortened to land on it.
     let total_samples = (duration.max(0.0) * f64::from(MIX_RATE)).round() as i64;
     let mut written_samples: i64 = 0;
+    let mut last_progress = -1.0f32;
     let drain = |encoder: &mut encoder::audio::Encoder,
                  output: &mut ffmpeg::format::context::Output|
      -> Result<()> {
@@ -579,6 +608,9 @@ pub fn mix_to_file(clips: &[AudioClip], duration: f64, destination: &Path) -> Re
             .map_err(|error| ffi::fail("filter", &inputs[index].path, error))?;
     }
     'mix: loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Error::Cancelled);
+        }
         // Pull everything the sink has.
         loop {
             let mut mixed = Audio::empty();
@@ -597,6 +629,15 @@ pub fn mix_to_file(clips: &[AudioClip], duration: f64, destination: &Path) -> Re
                     }
                     mixed.set_pts(Some(written_samples));
                     written_samples += mixed.samples() as i64;
+                    let fraction = if total_samples > 0 {
+                        (written_samples as f64 / total_samples as f64).clamp(0.0, 1.0) as f32
+                    } else {
+                        1.0
+                    };
+                    if fraction - last_progress >= 0.01 || fraction >= 1.0 {
+                        last_progress = fraction;
+                        progress(fraction);
+                    }
                     encoder
                         .send_frame(&mixed)
                         .map_err(|error| ffi::fail("encode", destination, error))?;
@@ -616,6 +657,9 @@ pub fn mix_to_file(clips: &[AudioClip], duration: f64, destination: &Path) -> Re
         }
         // Push one frame from every input that still has one.
         for input in inputs.iter_mut() {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Cancelled);
+            }
             if input.done {
                 continue;
             }
@@ -670,7 +714,9 @@ pub fn mix_to_file(clips: &[AudioClip], duration: f64, destination: &Path) -> Re
     drain(&mut encoder, &mut output)?;
     output
         .write_trailer()
-        .map_err(|error| ffi::fail("write trailer", destination, error))
+        .map_err(|error| ffi::fail("write trailer", destination, error))?;
+    progress(1.0);
+    Ok(())
 }
 
 /// Joins an already-encoded video file and audio file into `output`.
@@ -1183,6 +1229,17 @@ mod tests {
             (seconds - 16.0).abs() < 0.1,
             "the mix is {seconds}s, not 16s"
         );
+    }
+
+    #[test]
+    fn a_cancelled_analysis_mix_stops_before_creating_output() {
+        let destination =
+            std::env::temp_dir().join(format!("concat-cancelled-mix-{}.m4a", std::process::id()));
+        let _ = std::fs::remove_file(&destination);
+        let cancelled = AtomicBool::new(true);
+        let result = mix_to_file_with_control(&[], 10.0, &destination, &cancelled, &mut |_| {});
+        assert!(matches!(result, Err(Error::Cancelled)));
+        assert!(!destination.exists());
     }
 
     #[test]
