@@ -383,6 +383,23 @@ pub enum Command {
         #[serde(default)]
         offset_y: Option<f64>,
     },
+    /// Places an explicitly identified subtitle cue. It renders as an
+    /// ordinary text clip, but its persistent role lets SRT export and
+    /// whole-track styling distinguish captions from title cards without
+    /// guessing that the busiest title lane must be subtitles.
+    AddSubtitleClip {
+        /// Optional destination lane; None follows the same above-picture
+        /// placement as a regular title.
+        track_id: Option<String>,
+        /// Timeline position in seconds.
+        start: f64,
+        /// Words and appearance of the cue.
+        style: Option<TextStyle>,
+        /// Cue duration in seconds.
+        duration: Option<f64>,
+        /// Vertical placement as a fraction of frame height.
+        offset_y: Option<f64>,
+    },
     /// Places a shape: a clip with no media behind it that draws one
     /// figure over the picture, minting a "c" id. Lands the way a title
     /// does - above the picture - since a shape is drawn over it.
@@ -1060,6 +1077,13 @@ impl Command {
                 offset_y,
                 style,
                 ..
+            }
+            | Command::AddSubtitleClip {
+                start,
+                duration,
+                offset_y,
+                style,
+                ..
             } => {
                 bad([*start])
                     || bad(*duration)
@@ -1243,6 +1267,7 @@ pub fn apply(
         | Command::AddClipAtFirstFree { .. }
         | Command::AddClipsInSequence { .. }
         | Command::AddTextClip { .. }
+        | Command::AddSubtitleClip { .. }
         | Command::AddShapeClip { .. }
         | Command::AddLayerClip { .. }
         | Command::MoveClips { .. }

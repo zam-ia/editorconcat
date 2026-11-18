@@ -339,7 +339,11 @@ impl CaptionsPane {
             self.message = t("captions.noCaptionsToExport");
             return;
         };
-        let cues = srt::title_cues(studio.timeline(), Some(&lane.track_id));
+        let cues = if lane.explicit {
+            srt::subtitle_cues(studio.timeline())
+        } else {
+            srt::title_cues(studio.timeline(), Some(&lane.track_id))
+        };
         if let Err(error) = std::fs::write(path, srt::write(&cues)) {
             log::warn!("captions: could not write {}: {error}", path.display());
             self.message = tf("captions.couldNotWriteSubtitles", &[&error]);
@@ -604,6 +608,8 @@ struct ExportLane {
     track_id: String,
     /// Chosen as the lane with the most titles, not by a selected title.
     busiest: bool,
+    /// New caption clips identify themselves; false is the 0.2.x fallback.
+    explicit: bool,
 }
 
 /// The lane whose titles are written out as captions: the selected
@@ -612,6 +618,18 @@ struct ExportLane {
 /// else in the document tells them apart (see `srt::busiest_title_lane`).
 /// None when the timeline has no title.
 fn export_lane(studio: &Studio) -> Option<ExportLane> {
+    if let Some(clip) = studio
+        .timeline()
+        .clips
+        .iter()
+        .find(|clip| srt::is_subtitle(clip))
+    {
+        return Some(ExportLane {
+            track_id: clip.track_id.clone(),
+            busiest: false,
+            explicit: true,
+        });
+    }
     let selected = studio
         .sole_selection()
         .and_then(|id| studio.clip(&id))
@@ -621,10 +639,12 @@ fn export_lane(studio: &Studio) -> Option<ExportLane> {
         Some(track_id) => Some(ExportLane {
             track_id,
             busiest: false,
+            explicit: false,
         }),
         None => srt::busiest_title_lane(studio.timeline()).map(|track_id| ExportLane {
             track_id,
             busiest: true,
+            explicit: false,
         }),
     }
 }
@@ -764,9 +784,8 @@ fn caption_clip(
             ..TextStyle::default()
         },
     };
-    Command::AddTextClip {
+    Command::AddSubtitleClip {
         track_id: None,
-        above: true,
         start,
         style: Some(style),
         duration: Some(duration),

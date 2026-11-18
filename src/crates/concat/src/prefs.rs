@@ -57,6 +57,14 @@ pub struct Preferences {
     /// library it happens to be filed in is not part of it.
     #[serde(default)]
     pub favourites: Vec<String>,
+    /// Font families starred in the typography picker. Kept separate from
+    /// package favourites so an effect id can never collide with a family.
+    #[serde(default)]
+    pub font_favourites: Vec<String>,
+    /// Most recently applied font families, newest first and without
+    /// duplicates. This is personal UI state, not project data.
+    #[serde(default)]
+    pub recent_fonts: Vec<String>,
     /// The playhead stops at the end of the content instead of going where
     /// it is put. Off by default: a click past the last clip lands there, so
     /// a clip can be dropped at the playhead beyond everything else.
@@ -155,6 +163,43 @@ impl Default for VoiceoverPrefs {
 }
 
 impl Preferences {
+    /// Whether `family` is a typography favourite, case-insensitively.
+    pub fn font_is_favourite(&self, family: &str) -> bool {
+        self.font_favourites
+            .iter()
+            .any(|held| held.eq_ignore_ascii_case(family.trim()))
+    }
+
+    /// Stars or unstars one family and returns its new state.
+    pub fn toggle_font_favourite(&mut self, family: &str) -> bool {
+        let family = family.trim();
+        if family.is_empty() {
+            return false;
+        }
+        if self.font_is_favourite(family) {
+            self.font_favourites
+                .retain(|held| !held.eq_ignore_ascii_case(family));
+            false
+        } else {
+            self.font_favourites.push(family.to_owned());
+            self.font_favourites
+                .sort_by_cached_key(|name| name.to_lowercase());
+            true
+        }
+    }
+
+    /// Records a used family at the front of the bounded recent list.
+    pub fn remember_font(&mut self, family: &str) {
+        let family = family.trim();
+        if family.is_empty() {
+            return;
+        }
+        self.recent_fonts
+            .retain(|held| !held.eq_ignore_ascii_case(family));
+        self.recent_fonts.insert(0, family.to_owned());
+        self.recent_fonts.truncate(12);
+    }
+
     /// Whether the timeline shows its VU meters; see `vu_meters`.
     pub fn meters_shown(&self) -> bool {
         self.vu_meters.unwrap_or(true)
@@ -334,6 +379,51 @@ mod tests {
         assert_eq!(prefs.dark, Some(false));
         assert_eq!(prefs.last_project_location, None);
         assert_eq!(prefs.project_location(), None);
+    }
+
+    #[test]
+    fn typography_favourites_and_recents_are_separate_and_persistent() {
+        let root = std::env::temp_dir().join(format!(
+            "concat-typography-preferences-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = AppDirs::under(&root);
+        let mut prefs = Preferences::default();
+        prefs.favourites.push("concat.halation".to_owned());
+        assert!(prefs.toggle_font_favourite("Montserrat"));
+        assert!(!prefs.toggle_font_favourite("montserrat"));
+        assert!(prefs.toggle_font_favourite("Montserrat"));
+        prefs.remember_font("Inter");
+        prefs.remember_font("Montserrat");
+        prefs.remember_font("inter");
+        assert_eq!(prefs.recent_fonts, ["inter", "Montserrat"]);
+        prefs.save(&dirs);
+        let loaded = Preferences::load(&dirs);
+        assert!(loaded.font_is_favourite("montserrat"));
+        assert_eq!(loaded.favourites, ["concat.halation"]);
+        assert_eq!(loaded.recent_fonts, ["inter", "Montserrat"]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recent_fonts_are_unique_and_bounded() {
+        let mut prefs = Preferences::default();
+        for index in 0..20 {
+            prefs.remember_font(&format!("Family {index}"));
+        }
+        assert_eq!(prefs.recent_fonts.len(), 12);
+        assert_eq!(prefs.recent_fonts[0], "Family 19");
+        prefs.remember_font("family 15");
+        assert_eq!(prefs.recent_fonts[0], "family 15");
+        assert_eq!(
+            prefs
+                .recent_fonts
+                .iter()
+                .filter(|name| name.eq_ignore_ascii_case("Family 15"))
+                .count(),
+            1
+        );
     }
     const NAMES: [&str; 3] = ["Lime", "Sky", "Violet"];
 

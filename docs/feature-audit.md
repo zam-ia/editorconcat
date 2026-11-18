@@ -1,6 +1,6 @@
 # Auditoría funcional P0–P1 de Concat Studio
 
-**Fecha:** 13 de noviembre de 2026
+**Fecha:** 14 de noviembre de 2026
 **Base examinada:** EditorConcat sobre Concat 0.2.8  
 **Especificación:** `CONCAT_STUDIO_Especificacion_Maestra_UX_Funcional_v1.md`
 
@@ -95,10 +95,11 @@ stack actual sin una justificación adicional.
 | Velocidad constante y rampa | Probado | Speed map con resolución para video/audio | Sí | Sí | Sí | `speed.rs`, `resolve.rs`, export end-to-end | Flujo óptico no está implementado; timing sigue basado en segundos flotantes |
 | Máscaras | Probado | Lineal, espejo, círculo, rectángulo, corazón y estrella | Sí | Sí | Sí | `ClipMask`, compositor y tests | Polígono, trazado libre y booleanos suma/resta/intersección ausentes |
 | Estabilización | Probado | Análisis + transform/crop compartido | Sí | Sí | Sí | `concat-host/tests/stabilize.rs` | Falta un panel de diagnóstico del análisis y confianza |
-| Texto, caja, trazo, sombra y resplandor | Probado | `concat-text`, raster no destructivo | Sí | Sí | Sí | 27 pruebas de texto + `cargo check -p concat`; controles conectados a visor/export | Sombra expone color, intensidad, difusión y distancia; resplandor color, intensidad y difusión. Spread y X/Y separados siguen pendientes |
+| Texto, caja, trazo, sombra y resplandor | Probado | `concat-text`, raster no destructivo | Sí | Sí | Sí | 29 pruebas de texto + `cargo check -p concat`; controles conectados a visor/export | Sombra expone color, intensidad, difusión y distancia; resplandor color, intensidad y difusión. Spread y X/Y separados siguen pendientes |
+| Catálogo tipográfico profesional | Probado | `fontdb`/`ttf-parser`: familias, caras reales, metadata y cobertura | Preferencias separadas | Sí | Sí | tests de catálogo, español, favoritos y recientes; `docs/typography-system.md` | Ejes variables editables quedan pendientes; familias sin clase OS/2 quedan como Display |
 | Animaciones entrada/salida/bucle | Funcional | Presets convertidos a keys/curvas | Sí | Sí | Sí | `motion.rs`, compositor y tests existentes | Catálogo no cubre aún toda la especificación; falta prueba por cada preset |
 | Keyframes y curvas de easing | Probado | Propiedades absolutas, hold/linear/ease/bezier | Sí | Sí | Sí | `KeyProperty`, keyframe pane y tests | No todas las propiedades nuevas son animables; falta multi-selección general |
-| Subtítulos locales | Funcional | Speech local y clips de texto | Sí | Sí | Sí | `concat-speech`, caption workflows | Export `.srt/.vtt` y resaltado palabra a palabra requieren auditoría adicional |
+| Subtítulos locales | Probado | Speech local y clips con identidad explícita `subtitle` | Sí; estilo de pista es un batch | Sí | Sí/SRT | identidad vs. títulos + estilo atómico undo/redo + round-trip SRT | VTT y resaltado palabra a palabra requieren timestamps reales y pruebas propias |
 | Transiciones | Probado | Resolución A/B con handles y compositor | Sí | Sí | Sí | export end-to-end para catálogo base | Alineación inicio/centro/final y crossfade de audio configurable incompletos |
 | Efectos y filtros | Probado | WGSL/FFmpeg parametrizado con bypass/keys | Sí | Sí | Sí | catálogo, render tests y export end-to-end | No todos tienen benchmark o fallback equivalente documentado |
 | Ajustes básicos de color | Probado | Shader `concat.adjust` | Sí | Sí | Sí | WGSL, manifests, pruebas del catálogo/render | Falta calibración cuantitativa completa por control y material real |
@@ -191,3 +192,22 @@ undo/redo, save/reopen y coincidencia de exportación.
 
 La arquitectura, tolerancias, valores de referencia y limitaciones están documentados en
 `docs/audio-metering.md`.
+
+## Slice P1.3 — tipografía, títulos y subtítulos
+
+| Contrato P1.3 | Estado | Evidencia |
+|---|---|---|
+| Familias/variantes reales | Probado | Catálogo `fontdb` agrupado sin variantes duplicadas |
+| Español `¿¡ÁÉÍÓÚÜÑ` | Probado | Render con fuente embebida y bloque no vacío |
+| Favoritos separados | Probado | Persistencia JSON independiente de efectos |
+| Fuentes recientes | Probado | Unicidad case-insensitive y límite de 12 |
+| Importación y missing font | Funcional | Catálogo cacheado + registro del archivo existente; indicador missing conservado |
+| Galería de títulos | Funcional | 4 looks originales Wedding/Documentary/Commercial/Social, todos editables |
+| Sombra y resplandor de preset | Probado por parser/render existente | El schema de preset acepta color, intensidad, difusión y distancia/halo |
+| Identidad de subtítulos | Probado | Título y subtítulo simultáneos; SRT solo toma el cue explícito |
+| Estilo de pista | Probado | Batch de dos cues; un undo restaura ambos y redo los repone |
+| Compatibilidad 0.2.x | Conservada | Rol guardado en `Clip.extra`; export usa heurística heredada si no existe rol |
+
+Quedan deliberadamente fuera de la condición `Probado`: contenedor de título
+multi-elemento, ejes variables arbitrarios, VTT, karaoke por palabra y gestión
+de color scene-referred. No se añadieron controles visuales falsos para ellos.

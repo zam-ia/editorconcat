@@ -1,0 +1,24 @@
+id = "concat.commercial-reveal"
+name = "Commercial Reveal"
+language = "Latin"
+order = 5
+sample = "NEW"
+
+[style]
+content = "NUEVA COLECCIÓN"
+fontFamily = "Montserrat"
+fontWeight = 900
+fontSize = 0.105
+color = "#ffffff"
+tracking = -0.002
+strokeWidth = 0.002
+strokeColor = "#101114"
+shadow = true
+shadowColor = "#000000"
+shadowIntensity = 0.62
+shadowBlur = 0.016
+shadowDistance = 0.009
+glow = true
+glowColor = "#43d7ff"
+glowIntensity = 0.18
+glowBlur = 0.028

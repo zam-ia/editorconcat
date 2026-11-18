@@ -12,21 +12,49 @@ import { Theme } from "../theme/theme.slint";
 import { Glyph, Icon } from "../icons.slint";
 import { SearchField } from "controls.slint";
 import { Tip } from "../primitives/tooltip.slint";
+import { Select } from "../primitives/select.slint";
 import { ListView } from "std-widgets.slint";
+
+export struct FontFamilyData {
+    family: string,
+    styles: string,
+    favourite: bool,
+    recent: bool,
+    imported: bool,
+    monospaced: bool,
+    category: string,
+    variable: bool,
+    spanish: bool,
+}
+
+export struct FontVariantData {
+    family: string,
+    label: string,
+    weight: int,
+    italic: bool,
+}
 
 /// The list the picker shows, searched by Rust: Slint cannot filter a model,
 /// so the query goes out and the families that match come back.
 export global FontSearch {
-    in property <[string]> matches;
+    in property <[FontFamilyData]> matches;
+    in property <[FontVariantData]> variants;
+    in property <string> active-family;
+    in property <string> sample: "Nuestra historia comienza aquí";
     callback query-changed(text: string);
+    callback filter-changed(filter: int);
+    callback family-changed(family: string);
+    callback favourite-toggled(family: string);
 }
 
 export component FontPicker inherits Rectangle {
     /// The family the title names, as written.
     in property <string> family;
+    in property <float> weight: 400;
+    in property <bool> italic;
     /// Nothing on this machine has that family.
     in property <bool> missing;
-    callback picked(family: string);
+    callback picked(family: string, weight: float, italic: bool);
 
     height: Theme.h;
     horizontal-stretch: 1;
@@ -68,6 +96,7 @@ export component FontPicker inherits Rectangle {
         mouse-cursor: pointer;
         clicked => {
             FontSearch.query-changed("");
+            FontSearch.family-changed(root.family);
             list.show();
         }
     }
@@ -80,8 +109,8 @@ export component FontPicker inherits Rectangle {
     list := PopupWindow {
         x: 0;
         y: root.height + 4px;
-        width: Math.max(root.width, 220px);
-        height: 300px;
+        width: Math.max(root.width, 340px);
+        height: 460px;
         close-policy: close-on-click-outside;
 
         Rectangle {
@@ -101,6 +130,14 @@ export component FontPicker inherits Rectangle {
                     init => { self.focus(); }
                 }
 
+                Select {
+                    options: I18n.lang == "es"
+                        ? ["Todas", "Favoritas", "Recientes", "Serif", "Sans Serif", "Monoespaciadas", "Manuscritas", "Importadas"]
+                        : ["All", "Favourites", "Recent", "Serif", "Sans Serif", "Monospaced", "Script", "Imported"];
+                    current: 0;
+                    changed(index) => { FontSearch.filter-changed(index); }
+                }
+
                 if FontSearch.matches.length == 0: Text {
                     text: I18n.t("textPanel.noFontsMatch");
                     color: Theme.fg-dim;
@@ -113,28 +150,99 @@ export component FontPicker inherits Rectangle {
                 // each row is set in its own face.
                 if FontSearch.matches.length > 0: ListView {
                     vertical-stretch: 1;
-                    for name in FontSearch.matches: Rectangle {
-                        height: 28px;
+                    for entry in FontSearch.matches: Rectangle {
+                        height: 54px;
                         border-radius: Theme.r-sm;
-                        background: row.has-hover ? Theme.field-hover : transparent;
+                        background: entry.family == FontSearch.active-family
+                            ? Theme.field-active : row.has-hover ? Theme.field-hover : transparent;
 
                         Text {
                             x: 8px;
-                            width: parent.width - 16px;
-                            height: parent.height;
-                            text: name;
-                            font-family: name;
-                            font-size: Theme.fs;
-                            color: name == root.family ? Theme.accent : Theme.fg;
-                            vertical-alignment: center;
+                            y: 4px;
+                            width: parent.width - 40px;
+                            height: 27px;
+                            text: FontSearch.sample;
+                            font-family: entry.family;
+                            font-size: Theme.fs-lg;
+                            color: entry.family == root.family ? Theme.accent : Theme.fg;
+                            vertical-alignment: bottom;
                             overflow: elide;
                         }
 
+                        Text {
+                            x: 8px;
+                            y: 31px;
+                            width: parent.width - 42px;
+                            height: 18px;
+                            text: entry.family + " · " + entry.styles
+                                + (entry.variable ? " · Variable" : "")
+                                + (!entry.spanish ? " · ⚠ Español" : "");
+                            font-size: Theme.fs-sm;
+                            color: Theme.fg-dim;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            x: parent.width - 32px;
+                            width: 28px;
+                            height: parent.height;
+                            text: entry.favourite ? "★" : "☆";
+                            color: entry.favourite ? Theme.accent : Theme.fg-dim;
+                            font-size: 17px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            star := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { FontSearch.favourite-toggled(entry.family); }
+                            }
+                        }
+
                         row := TouchArea {
+                            width: parent.width - 34px;
                             mouse-cursor: pointer;
                             clicked => {
-                                root.picked(name);
-                                list.close();
+                                FontSearch.family-changed(entry.family);
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.line; }
+
+                Text {
+                    text: FontSearch.active-family == "" ? "—" : FontSearch.active-family;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                }
+
+                // Only the real faces reported by fontdb are offered. Picking
+                // one changes family, weight and slant together.
+                Rectangle {
+                    height: 94px;
+                    if FontSearch.variants.length > 0: ListView {
+                        for variant in FontSearch.variants: Rectangle {
+                            height: 28px;
+                            border-radius: Theme.r-sm;
+                            background: variant.weight == root.weight && variant.italic == root.italic
+                                && variant.family == root.family ? Theme.field-active
+                                : variant-touch.has-hover ? Theme.field-hover : transparent;
+                            Text {
+                                x: 8px;
+                                width: parent.width - 16px;
+                                height: parent.height;
+                                text: variant.label + " · " + variant.weight;
+                                font-family: variant.family;
+                                font-weight: variant.weight;
+                                font-italic: variant.italic;
+                                color: Theme.fg;
+                                vertical-alignment: center;
+                            }
+                            variant-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.picked(variant.family, variant.weight, variant.italic);
+                                    list.close();
+                                }
                             }
                         }
                     }

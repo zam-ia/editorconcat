@@ -1,0 +1,23 @@
+id = "concat.wedding-cinema"
+name = "Wedding Cinema"
+language = "Latin"
+order = 3
+sample = "A & M"
+
+[style]
+content = "ALEXANDRA & MATEO\nNUESTRA HISTORIA"
+fontFamily = "DM Serif Display"
+fontWeight = 400
+fontSize = 0.075
+color = "#f5f0e8"
+tracking = 0.018
+lineHeight = 1.45
+shadow = true
+shadowColor = "#000000"
+shadowIntensity = 0.52
+shadowBlur = 0.018
+shadowDistance = 0.006
+glow = true
+glowColor = "#d6b77a"
+glowIntensity = 0.16
+glowBlur = 0.024

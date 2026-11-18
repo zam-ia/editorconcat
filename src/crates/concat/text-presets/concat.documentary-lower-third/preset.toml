@@ -1,0 +1,26 @@
+id = "concat.documentary-lower-third"
+name = "Documentary Lower Third"
+language = "Latin"
+order = 4
+sample = "NAME"
+offsetY = 0.31
+
+[style]
+content = "MICHAEL HILTZIK\nJOURNALIST & AUTHOR"
+fontFamily = "Inter"
+fontWeight = 700
+fontSize = 0.052
+color = "#ffffff"
+align = "left"
+lineHeight = 1.05
+tracking = 0.001
+maxWidth = 0.54
+background = "#080808b8"
+backgroundRadius = 0.006
+backgroundPaddingX = 0.018
+backgroundPaddingY = 0.012
+shadow = true
+shadowColor = "#000000"
+shadowIntensity = 0.45
+shadowBlur = 0.008
+shadowDistance = 0.004

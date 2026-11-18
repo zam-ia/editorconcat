@@ -1,0 +1,25 @@
+id = "concat.social-hook"
+name = "Social Hook"
+language = "Latin"
+order = 6
+sample = "WOW"
+offsetY = 0.22
+
+[style]
+content = "¿TE IMAGINAS\nESTO?"
+fontFamily = "Anton"
+fontWeight = 400
+fontSize = 0.088
+color = "#ffffff"
+lineHeight = 0.92
+strokeWidth = 0.01
+strokeColor = "#111111"
+shadow = true
+shadowColor = "#000000"
+shadowIntensity = 0.7
+shadowBlur = 0.014
+shadowDistance = 0.008
+glow = true
+glowColor = "#ff304f"
+glowIntensity = 0.3
+glowBlur = 0.024

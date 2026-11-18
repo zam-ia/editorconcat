@@ -701,7 +701,9 @@ pub struct Models {
     /// The families a title can be set in; see `Studio::font_families`.
     pub font_families: Rc<VecModel<SharedString>>,
     /// Those of them the font picker's search lets through.
-    pub font_matches: Rc<VecModel<SharedString>>,
+    pub font_matches: Rc<VecModel<FontFamilyData>>,
+    /// The real faces available for the family highlighted in the picker.
+    pub font_variants: Rc<VecModel<FontVariantData>>,
 }
 
 impl Models {
@@ -770,6 +772,7 @@ impl Models {
             language_presets: Rc::new(VecModel::default()),
             font_families: Rc::new(VecModel::default()),
             font_matches: Rc::new(VecModel::default()),
+            font_variants: Rc::new(VecModel::default()),
         }
     }
 }
@@ -1114,14 +1117,25 @@ pub struct Studio {
     /// project a title is set in one of them registers the file so the
     /// painter finds it. See `presets::installed_fonts`.
     pub installed_fonts: Vec<(String, String)>,
+    /// Metadata for fonts imported into Concat's own directory. Cached at
+    /// launch/import so opening the picker never reparses font files.
+    pub installed_font_catalogue: Vec<concat_text::FontFamilyInfo>,
     /// The families the machine has, found on a worker after the window is
     /// up - the system's fonts take a moment to read - and empty until then.
     pub system_fonts: Vec<String>,
+    /// Real families and faces discovered on the worker. The bundled faces
+    /// are included and marked separately by `concat-text`.
+    pub system_font_catalogue: Vec<concat_text::FontFamilyInfo>,
     /// A fingerprint of what `font_families` was last published from, so
     /// a publish that changes none of it leaves the picker's list alone.
     fonts_published: std::cell::Cell<Option<u64>>,
     /// What the font picker's search box holds.
     pub font_query: String,
+    /// Font picker category: all, favourites, recent, serif, sans, mono,
+    /// script or imported.
+    pub font_filter: i32,
+    /// The family whose real variants are visible in the lower picker.
+    pub font_active_family: String,
     /// The families and the query the search's matches were last
     /// published from, hashed.
     font_search_published: std::cell::Cell<Option<u64>>,
@@ -2444,6 +2458,43 @@ fn label_of(id: &str) -> String {
         .join(" ")
 }
 
+/// Adds one font family to a catalogue without inventing faces. A bundled
+/// family keeps its bundled provenance; otherwise an imported copy is more
+/// useful to report than the same family also being installed system-wide.
+fn merge_font_family(
+    catalogue: &mut Vec<concat_text::FontFamilyInfo>,
+    incoming: concat_text::FontFamilyInfo,
+) {
+    use concat_text::FontOrigin;
+    if let Some(held) = catalogue
+        .iter_mut()
+        .find(|held| held.family.eq_ignore_ascii_case(&incoming.family))
+    {
+        for variant in incoming.variants {
+            if !held
+                .variants
+                .iter()
+                .any(|face| face.weight == variant.weight && face.italic == variant.italic)
+            {
+                held.variants.push(variant);
+            }
+        }
+        held.variants
+            .sort_by_key(|variant| (variant.weight, variant.italic));
+        held.monospaced |= incoming.monospaced;
+        held.serif |= incoming.serif;
+        held.sans_serif |= incoming.sans_serif;
+        held.script |= incoming.script;
+        held.variable |= incoming.variable;
+        held.spanish |= incoming.spanish;
+        if held.origin != FontOrigin::Bundled && incoming.origin == FontOrigin::Imported {
+            held.origin = FontOrigin::Imported;
+        }
+    } else {
+        catalogue.push(incoming);
+    }
+}
+
 impl Studio {
     /// A window with nothing open: the launch screen, with the recents list
     /// read off disk.
@@ -2470,6 +2521,13 @@ impl Studio {
         let languages = i18n::languages(&host.dirs);
         let recents = projects::recents(&host.dirs.config);
         let text_presets = presets::all(&host.dirs);
+        let installed_fonts = presets::installed_fonts(&host.dirs);
+        let mut installed_font_catalogue = Vec::new();
+        for (_, path) in &installed_fonts {
+            for family in concat_text::catalogue_in(std::path::Path::new(path)) {
+                merge_font_family(&mut installed_font_catalogue, family);
+            }
+        }
         let mut studio = Self {
             prefs,
             library: Default::default(),
@@ -2556,10 +2614,14 @@ impl Studio {
             color_scopes: ColorScopeState::default(),
             voiceover: crate::panes::voiceover::VoiceoverPane::default(),
             text_presets,
-            installed_fonts: presets::installed_fonts(&host.dirs),
+            installed_fonts,
+            installed_font_catalogue,
             system_fonts: Vec::new(),
+            system_font_catalogue: Vec::new(),
             fonts_published: std::cell::Cell::new(None),
             font_query: String::new(),
+            font_filter: 0,
+            font_active_family: String::new(),
             font_search_published: std::cell::Cell::new(None),
             languages,
             brush: 0,
@@ -5738,6 +5800,9 @@ impl Studio {
         // is set in it, as a command of its own: the painter reads the
         // project's fonts, and the echo below is not the project.
         if field == ClipTextField::FontFamily {
+            self.prefs.remember_font(value);
+            self.prefs.save(&self.host.dirs);
+            self.font_search_published.set(None);
             self.ensure_font(value);
         }
         self.commit_targets = ids.clone();
@@ -5786,32 +5851,21 @@ impl Studio {
     /// and the app's installed ones, once each, in alphabetical order; then
     /// the system's, likewise, less any already listed.
     pub fn font_families(&self) -> Vec<String> {
-        let mut out = vec![concat_text::BUNDLED_FAMILY.to_owned()];
-        let mut own: Vec<String> = self
-            .installed_fonts
-            .iter()
-            .map(|(family, _)| family.clone())
-            .chain(
-                self.session
-                    .as_ref()
-                    .map(|session| session.project().fonts.clone())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|font| font.family),
-            )
-            .filter(|family| !family.is_empty())
-            .collect();
-        own.sort_by_cached_key(|family| family.to_lowercase());
-        own.dedup();
-        let mut held: std::collections::HashSet<String> = out
-            .iter()
-            .map(|family| family.to_ascii_lowercase())
-            .collect();
-        for family in own.into_iter().chain(self.system_fonts.iter().cloned()) {
-            if held.insert(family.to_ascii_lowercase()) {
-                out.push(family);
-            }
+        self.font_catalogue()
+            .into_iter()
+            .map(|family| family.family)
+            .collect()
+    }
+
+    /// All usable families with their real variants. Project fonts that
+    /// cannot currently be opened are deliberately absent here: the title
+    /// inspector already marks those missing and offers relink/import.
+    pub fn font_catalogue(&self) -> Vec<concat_text::FontFamilyInfo> {
+        let mut out = self.system_font_catalogue.clone();
+        for family in self.installed_font_catalogue.iter().cloned() {
+            merge_font_family(&mut out, family);
         }
+        out.sort_by_cached_key(|family| family.family.to_lowercase());
         out
     }
 
@@ -5827,12 +5881,38 @@ impl Studio {
             }
         }
         self.system_fonts.hash(&mut hasher);
+        self.prefs.font_favourites.hash(&mut hasher);
+        self.prefs.recent_fonts.hash(&mut hasher);
+        self.font_filter.hash(&mut hasher);
+        self.font_active_family.hash(&mut hasher);
         hasher.finish()
     }
 
-    /// The machine's families have been read; see `system_fonts`.
-    pub fn system_fonts_known(&mut self, families: Vec<String>) {
-        self.system_fonts = families;
+    /// The machine's real families and faces have been read on the worker.
+    pub fn system_fonts_known(&mut self, catalogue: Vec<concat_text::FontFamilyInfo>) {
+        self.system_fonts = catalogue
+            .iter()
+            .map(|family| family.family.clone())
+            .collect();
+        self.system_font_catalogue = catalogue;
+        self.fonts_published.set(None);
+        self.font_search_published.set(None);
+    }
+
+    pub fn font_filter_changed(&mut self, filter: i32) {
+        self.font_filter = filter.clamp(0, 7);
+        self.font_search_published.set(None);
+    }
+
+    pub fn font_family_changed(&mut self, family: &str) {
+        self.font_active_family = family.to_owned();
+        self.font_search_published.set(None);
+    }
+
+    pub fn font_favourite_toggle(&mut self, family: &str) {
+        self.prefs.toggle_font_favourite(family);
+        self.prefs.save(&self.host.dirs);
+        self.font_search_published.set(None);
     }
 
     /// Font files the user picked: each is copied to the app's own folder,
@@ -5852,6 +5932,9 @@ impl Studio {
                 continue;
             };
             let file = installed.to_string_lossy().into_owned();
+            for family in concat_text::catalogue_in(&installed) {
+                merge_font_family(&mut self.installed_font_catalogue, family);
+            }
             for family in families {
                 if !self.installed_fonts.iter().any(|(held, _)| *held == family) {
                     self.installed_fonts.push((family.clone(), file.clone()));
@@ -5965,6 +6048,42 @@ impl Studio {
         self.prefs.title_style = Some(style);
         self.prefs.save(&self.host.dirs);
         self.notify(&t("textPanel.newTitlesUseThisStyle"), false);
+    }
+
+    /// Copies the selected title's appearance to every explicitly marked
+    /// subtitle cue while preserving each cue's own words and timing. The
+    /// full track update is one batch, therefore one undo/redo operation.
+    pub fn apply_title_style_to_subtitles(&mut self) {
+        let Some(base) = self
+            .edit_targets()
+            .first()
+            .and_then(|id| self.clip(id))
+            .filter(|clip| clip.kind == model::ClipKind::Text)
+            .and_then(|clip| clip.text.clone())
+        else {
+            return;
+        };
+        let commands: Vec<Command> = self
+            .timeline()
+            .clips
+            .iter()
+            .filter(|clip| concat_project::srt::is_subtitle(clip))
+            .filter_map(|clip| {
+                let mut style = base.clone();
+                style.content = clip.text.as_ref()?.content.clone();
+                Some(Command::UpdateClip {
+                    clip_id: clip.id.clone(),
+                    patch: ClipPatch {
+                        text: Some(Some(style)),
+                        ..ClipPatch::default()
+                    },
+                })
+            })
+            .collect();
+        if commands.is_empty() {
+            return;
+        }
+        self.apply(Command::Batch { commands });
     }
 
     /// The inspector's gesture is over: what differs between the echo and
@@ -9883,26 +10002,121 @@ impl Studio {
         let searched = Some({
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            (fonts, &self.font_query).hash(&mut hasher);
+            (
+                fonts,
+                &self.font_query,
+                self.font_filter,
+                &self.font_active_family,
+            )
+                .hash(&mut hasher);
             hasher.finish()
         });
         if self.fonts_published.get() != fonts || self.font_search_published.get() != searched {
             self.fonts_published.set(fonts);
             self.font_search_published.set(searched);
-            let families = self.font_families();
+            let mut catalogue = self.font_catalogue();
             let query = self.font_query.trim().to_lowercase();
-            sync(
-                &models.font_matches,
-                families
-                    .iter()
-                    .filter(|family| query.is_empty() || family.to_lowercase().contains(&query))
-                    .map(SharedString::from)
-                    .collect(),
-            );
+            if self.font_filter == 2 {
+                catalogue.sort_by_key(|family| {
+                    self.prefs
+                        .recent_fonts
+                        .iter()
+                        .position(|recent| recent.eq_ignore_ascii_case(&family.family))
+                        .unwrap_or(usize::MAX)
+                });
+            }
+            let selected_family = self
+                .sole_selection()
+                .and_then(|id| self.clip(&id))
+                .and_then(|clip| clip.text.as_ref())
+                .map(|text| text.font_family.as_str())
+                .unwrap_or(concat_text::BUNDLED_FAMILY);
+            let active_family = if self.font_active_family.is_empty() {
+                selected_family
+            } else {
+                &self.font_active_family
+            };
+            let visible: Vec<FontFamilyData> = catalogue
+                .iter()
+                .filter(|family| query.is_empty() || family.family.to_lowercase().contains(&query))
+                .filter(|family| match self.font_filter {
+                    1 => self.prefs.font_is_favourite(&family.family),
+                    2 => self
+                        .prefs
+                        .recent_fonts
+                        .iter()
+                        .any(|recent| recent.eq_ignore_ascii_case(&family.family)),
+                    3 => family.serif,
+                    4 => family.sans_serif,
+                    5 => family.monospaced,
+                    6 => family.script,
+                    7 => family.origin == concat_text::FontOrigin::Imported,
+                    _ => true,
+                })
+                .map(|family| {
+                    let styles = family
+                        .variants
+                        .iter()
+                        .take(3)
+                        .map(|variant| variant.label.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let category = if family.script {
+                        "Script"
+                    } else if family.monospaced {
+                        "Mono"
+                    } else if family.serif {
+                        "Serif"
+                    } else if family.sans_serif {
+                        "Sans Serif"
+                    } else {
+                        "Display"
+                    };
+                    FontFamilyData {
+                        family: family.family.as_str().into(),
+                        styles: styles.into(),
+                        favourite: self.prefs.font_is_favourite(&family.family),
+                        recent: self
+                            .prefs
+                            .recent_fonts
+                            .iter()
+                            .any(|recent| recent.eq_ignore_ascii_case(&family.family)),
+                        imported: family.origin == concat_text::FontOrigin::Imported,
+                        monospaced: family.monospaced,
+                        category: category.into(),
+                        variable: family.variable,
+                        spanish: family.spanish,
+                    }
+                })
+                .collect();
+            let variants = catalogue
+                .iter()
+                .find(|family| family.family.eq_ignore_ascii_case(active_family))
+                .map(|family| {
+                    family
+                        .variants
+                        .iter()
+                        .map(|variant| FontVariantData {
+                            family: family.family.as_str().into(),
+                            label: variant.label.as_str().into(),
+                            weight: variant.weight as i32,
+                            italic: variant.italic,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            sync(&models.font_matches, visible);
+            sync(&models.font_variants, variants);
             sync(
                 &models.font_families,
-                families.into_iter().map(SharedString::from).collect(),
+                catalogue
+                    .into_iter()
+                    .map(|family| SharedString::from(family.family))
+                    .collect(),
             );
+            let search = app.global::<FontSearch>();
+            search.set_active_family(active_family.into());
+            search.set_sample("¡Nuestra historia comienza aquí!".into());
         }
         editor.set_inspector_jump_token(self.inspector_jump.0);
         editor.set_library_audition(self.audition_of().unwrap_or("").into());

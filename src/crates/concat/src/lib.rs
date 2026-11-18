@@ -342,8 +342,8 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     // the window should not open a moment late for a list nobody is
     // looking at yet.
     host::spawn(
-        || concat_text::Fonts::new().families(),
-        |studio, _, _, families| studio.system_fonts_known(families),
+        || concat_text::Fonts::new().catalogue(),
+        |studio, _, _, catalogue| studio.system_fonts_known(catalogue),
     );
 
     // Handed over once, here, and never replaced: a fresh model is a reset,
@@ -420,6 +420,8 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         editor.set_font_families(ModelRc::from(models.font_families.clone()));
         app.global::<FontSearch>()
             .set_matches(ModelRc::from(models.font_matches.clone()));
+        app.global::<FontSearch>()
+            .set_variants(ModelRc::from(models.font_variants.clone()));
     }
 
     // Settings > About's block, gathered once: nothing in it changes while
@@ -838,6 +840,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     // the answer later, on the window's thread.
     editor.on_text_style_default(on_window!(|state| {
         state.use_title_style_for_new();
+    }));
+    editor.on_subtitle_style_track(on_window!(|state| {
+        state.apply_title_style_to_subtitles();
     }));
     editor.on_import_font(|| {
         Shell::with(|shell, _| {
@@ -1359,6 +1364,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.global::<FontSearch>()
         .on_query_changed(on_window!(|state, text: SharedString| {
             state.font_query = text.to_string();
+        }));
+    app.global::<FontSearch>()
+        .on_filter_changed(on_window!(|state, filter: i32| {
+            state.font_filter_changed(filter);
+        }));
+    app.global::<FontSearch>()
+        .on_family_changed(on_window!(|state, family: SharedString| {
+            state.font_family_changed(family.as_str());
+        }));
+    app.global::<FontSearch>()
+        .on_favourite_toggled(on_window!(|state, family: SharedString| {
+            state.font_favourite_toggle(family.as_str());
         }));
     app.global::<Meters>().on_clip_cleared({
         let weak = app.as_weak();

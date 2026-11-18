@@ -102,6 +102,14 @@ struct PresetStyle {
     stroke_width: Option<f64>,
     stroke_color: Option<String>,
     shadow: Option<bool>,
+    shadow_color: Option<String>,
+    shadow_intensity: Option<f64>,
+    shadow_blur: Option<f64>,
+    shadow_distance: Option<f64>,
+    glow: Option<bool>,
+    glow_color: Option<String>,
+    glow_intensity: Option<f64>,
+    glow_blur: Option<f64>,
     background: Option<String>,
     background_radius: Option<f64>,
     background_padding_x: Option<f64>,
@@ -136,14 +144,23 @@ impl PresetStyle {
             stroke_width: self.stroke_width.unwrap_or(0.0).max(0.0),
             stroke_color: self.stroke_color.unwrap_or(base.stroke_color),
             shadow: self.shadow.unwrap_or(true),
-            shadow_color: base.shadow_color,
-            shadow_intensity: base.shadow_intensity,
-            shadow_blur: base.shadow_blur,
-            shadow_distance: base.shadow_distance,
-            glow: base.glow,
-            glow_color: base.glow_color,
-            glow_intensity: base.glow_intensity,
-            glow_blur: base.glow_blur,
+            shadow_color: self.shadow_color.unwrap_or(base.shadow_color),
+            shadow_intensity: self
+                .shadow_intensity
+                .unwrap_or(base.shadow_intensity)
+                .clamp(0.0, 1.0),
+            shadow_blur: self.shadow_blur.unwrap_or(base.shadow_blur).max(0.0),
+            shadow_distance: self
+                .shadow_distance
+                .unwrap_or(base.shadow_distance)
+                .max(0.0),
+            glow: self.glow.unwrap_or(base.glow),
+            glow_color: self.glow_color.unwrap_or(base.glow_color),
+            glow_intensity: self
+                .glow_intensity
+                .unwrap_or(base.glow_intensity)
+                .clamp(0.0, 1.0),
+            glow_blur: self.glow_blur.unwrap_or(base.glow_blur).max(0.0),
             background: self.background.unwrap_or_default(),
             background_radius: self
                 .background_radius

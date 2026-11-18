@@ -161,6 +161,47 @@ pub(super) fn apply(
             })
         }
 
+        Command::AddSubtitleClip {
+            track_id,
+            start,
+            style,
+            duration,
+            offset_y,
+        } => {
+            let style = style.unwrap_or_default();
+            let duration = duration
+                .unwrap_or(DEFAULT_TEXT_DURATION)
+                .max(MIN_CLIP_DURATION);
+            let timeline = project.active_mut();
+            let track_id = match track_id {
+                Some(id) if timeline.track(&id).is_some() => id,
+                Some(_) => return Err(CommandError::TrackGone),
+                None => first_free_track_above(timeline, start, duration)
+                    .unwrap_or_else(|| fresh_track(timeline, mint)),
+            };
+            let start = timeline.nearest_free_start(&track_id, start, duration, &[]);
+            let id = mint.next("c");
+            let mut clip = Clip::blank(
+                id.clone(),
+                track_id,
+                ClipKind::Text,
+                first_line(&style.content),
+                start,
+                duration,
+            );
+            clip.offset_y = offset_y.unwrap_or(0.0).clamp(-MAX_OFFSET, MAX_OFFSET);
+            clip.text = Some(style);
+            clip.extra.insert(
+                "role".to_owned(),
+                serde_json::Value::String("subtitle".to_owned()),
+            );
+            timeline.clips.push(Arc::new(clip));
+            Ok(Outcome {
+                created_id: Some(id),
+                applied: true,
+            })
+        }
+
         Command::AddShapeClip {
             track_id,
             above,

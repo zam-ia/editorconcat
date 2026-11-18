@@ -46,6 +46,9 @@ export component TextPanel inherits VerticalLayout {
     callback import-font();
     /// Keep this title's look for new titles and captions.
     callback set-default();
+    /// Apply this look to every explicitly identified subtitle cue as one
+    /// undoable operation, preserving words and timing.
+    callback apply-subtitle-track();
 
     /// Several titles selected together: every knob writes to all of them
     /// and the words, each title's own, are not offered.
@@ -85,9 +88,6 @@ export component TextPanel inherits VerticalLayout {
     property <float> last-h;
     property <float> offset-x;
     property <float> offset-y;
-    property <int> weight-index;
-
-    property <[float]> weights: [400, 500, 600, 700];
     /// The label column of the rows whose label is two words.
     property <length> label-w: 74px;
     property <float> frame-w: Math.max(1, root.selected.frame-width);
@@ -115,9 +115,6 @@ export component TextPanel inherits VerticalLayout {
         root.h-mode = root.box-h > 0 ? 0 : 1;
         root.offset-x = root.selected.offset-x;
         root.offset-y = root.selected.offset-y;
-        root.weight-index = root.selected.font-weight >= 700 ? 3
-            : root.selected.font-weight >= 600 ? 2
-            : root.selected.font-weight >= 500 ? 1 : 0;
     }
 
     init => { root.seed(); }
@@ -299,9 +296,13 @@ export component TextPanel inherits VerticalLayout {
             // names one this machine does not have.
             FontPicker {
                 family: root.selected.font-family;
+                weight: root.selected.font-weight;
+                italic: root.selected.italic;
                 missing: root.selected.font-missing;
-                picked(family) => {
+                picked(family, weight, italic) => {
                     root.set-text(ClipTextField.font-family, family);
+                    root.set(ClipField.font-weight, weight);
+                    root.set(ClipField.italic, italic ? 1 : 0);
                     root.commit();
                 }
             }
@@ -324,17 +325,30 @@ export component TextPanel inherits VerticalLayout {
                 ghost: true;
                 clicked => { root.set-default(); }
             }
+            Button {
+                label: I18n.lang == "es" ? "Aplicar a subtítulos" : "Apply to subtitles";
+                ghost: true;
+                clicked => { root.apply-subtitle-track(); }
+            }
         }
 
         Row {
             label: I18n.t("textPanel.fontWeight");
             label-width: root.label-w;
-            Select {
-                options: [I18n.t("textPanel.regular"), I18n.t("common.medium"), I18n.t("textPanel.semibold"), I18n.t("textPanel.bold")];
-                current <=> root.weight-index;
-                changed(index) => {
-                    root.set(ClipField.font-weight, root.weights[index]);
-                    root.commit();
+            Rectangle {
+                height: Theme.h;
+                horizontal-stretch: 1;
+                background: Theme.field;
+                border-radius: Theme.r;
+                Text {
+                    x: 8px;
+                    width: parent.width - 16px;
+                    height: parent.height;
+                    text: "\{Math.round(root.selected.font-weight)}"
+                        + (root.selected.italic ? " · Italic" : "");
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
                 }
             }
         }

@@ -215,6 +215,42 @@ pub struct Fonts {
     cache: Mutex<Cache>,
 }
 
+/// Where a face offered by the professional font picker comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FontOrigin {
+    /// Shipped with Concat under its recorded open-source licence.
+    Bundled,
+    /// Discovered in the operating system's font collection.
+    System,
+    /// Copied into Concat's own font directory by the user.
+    Imported,
+}
+
+/// A real face exposed by a font family. Weight and slant come from the
+/// font's metadata; they are never inferred from its file name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FontVariantInfo {
+    pub label: String,
+    pub weight: u16,
+    pub italic: bool,
+    pub postscript_name: String,
+}
+
+/// Metadata for one family in the font picker.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FontFamilyInfo {
+    pub family: String,
+    pub variants: Vec<FontVariantInfo>,
+    pub origin: FontOrigin,
+    pub monospaced: bool,
+    pub serif: bool,
+    pub sans_serif: bool,
+    pub script: bool,
+    pub variable: bool,
+    /// Every character used by the Spanish acceptance sample has a glyph.
+    pub spanish: bool,
+}
+
 /// A face's bytes: the file mapped, or the data a font was loaded from.
 type FaceData = Arc<dyn AsRef<[u8]> + Send + Sync>;
 
@@ -444,6 +480,12 @@ impl Fonts {
     pub fn families(&self) -> Vec<String> {
         family_names(&self.db)
     }
+
+    /// The same database as [`Self::families`], grouped into real families
+    /// and variants for the professional picker.
+    pub fn catalogue(&self) -> Vec<FontFamilyInfo> {
+        font_catalogue(&self.db, FontOrigin::System)
+    }
 }
 
 /// The families a font file carries - one for a face, several for a
@@ -455,6 +497,124 @@ pub fn families_in(path: &std::path::Path) -> Vec<String> {
         return Vec::new();
     }
     family_names(&db)
+}
+
+/// Every family and face carried by one font file. A malformed or unsupported
+/// file produces an empty list and is safe to reject during import.
+pub fn catalogue_in(path: &std::path::Path) -> Vec<FontFamilyInfo> {
+    let mut db = fontdb::Database::new();
+    if db.load_font_file(path).is_err() {
+        return Vec::new();
+    }
+    font_catalogue(&db, FontOrigin::Imported)
+}
+
+fn weight_label(weight: u16, italic: bool) -> String {
+    let base = match weight {
+        0..=149 => "Thin",
+        150..=249 => "Extra Light",
+        250..=349 => "Light",
+        350..=449 => "Regular",
+        450..=549 => "Medium",
+        550..=649 => "SemiBold",
+        650..=749 => "Bold",
+        750..=849 => "ExtraBold",
+        _ => "Black",
+    };
+    if italic {
+        format!("{base} Italic")
+    } else {
+        base.to_owned()
+    }
+}
+
+/// Reads the OS/2 family class. This is optional metadata: an absent or
+/// unknown class remains neutral instead of being guessed from a name.
+fn family_class(face: &ttf_parser::Face<'_>) -> u8 {
+    face.raw_face()
+        .table(ttf_parser::Tag::from_bytes(b"OS/2"))
+        .filter(|table| table.len() >= 32)
+        .map_or(0, |table| table[30])
+}
+
+fn font_catalogue(db: &fontdb::Database, file_origin: FontOrigin) -> Vec<FontFamilyInfo> {
+    let mut out: Vec<FontFamilyInfo> = Vec::new();
+    for info in db.faces() {
+        let Some(family) = info
+            .families
+            .first()
+            .map(|(name, _)| name.trim())
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        let italic = !matches!(info.style, fontdb::Style::Normal);
+        let (variable, spanish, class) = db
+            .with_face_data(info.id, |bytes, index| {
+                ttf_parser::Face::parse(bytes, index)
+                    .ok()
+                    .map(|face| {
+                        const SPANISH: &str = "¿¡ÁÉÍÓÚÜÑáéíóúüñ";
+                        (
+                            face.is_variable(),
+                            SPANISH.chars().all(|ch| face.glyph_index(ch).is_some()),
+                            family_class(&face),
+                        )
+                    })
+                    .unwrap_or((false, false, 0))
+            })
+            .unwrap_or((false, false, 0));
+        let origin = match &info.source {
+            fontdb::Source::Binary(_) => FontOrigin::Bundled,
+            _ => file_origin,
+        };
+        let variant = FontVariantInfo {
+            label: weight_label(info.weight.0, italic),
+            weight: info.weight.0,
+            italic,
+            postscript_name: info.post_script_name.clone(),
+        };
+        let found = out
+            .iter_mut()
+            .find(|held| held.family.eq_ignore_ascii_case(family));
+        if let Some(found) = found {
+            if !found
+                .variants
+                .iter()
+                .any(|held| held.weight == variant.weight && held.italic == variant.italic)
+            {
+                found.variants.push(variant);
+            }
+            found.variable |= variable;
+            found.spanish |= spanish;
+            found.monospaced |= info.monospaced;
+            found.serif |= matches!(class, 1..=5 | 7);
+            found.sans_serif |= class == 8;
+            found.script |= class == 10;
+            if origin == FontOrigin::Bundled {
+                found.origin = origin;
+            }
+        } else {
+            out.push(FontFamilyInfo {
+                family: family.to_owned(),
+                variants: vec![variant],
+                origin,
+                monospaced: info.monospaced,
+                serif: matches!(class, 1..=5 | 7),
+                sans_serif: class == 8,
+                script: class == 10,
+                variable,
+                spanish,
+            });
+        }
+    }
+    for family in &mut out {
+        family
+            .variants
+            .sort_by_key(|variant| (variant.weight, variant.italic));
+    }
+    out.sort_by_cached_key(|family| family.family.to_lowercase());
+    out
 }
 
 fn family_names(db: &fontdb::Database) -> Vec<String> {
@@ -2376,6 +2536,49 @@ mod tests {
         assert_eq!(colour("#00ff0080"), Some(Color::from_rgba8(0, 255, 0, 128)));
         assert_eq!(colour(""), None);
         assert_eq!(colour("red"), None);
+    }
+
+    #[test]
+    fn font_catalogue_groups_real_faces_without_duplicate_variants() {
+        let catalogue = Fonts::with_system(false).catalogue();
+        let inter = catalogue
+            .iter()
+            .find(|family| family.family == "Inter")
+            .expect("bundled Inter");
+        assert_eq!(inter.origin, FontOrigin::Bundled);
+        assert!(inter.spanish);
+        assert!(
+            inter
+                .variants
+                .iter()
+                .any(|variant| variant.weight == 400 && !variant.italic)
+        );
+        assert!(
+            inter
+                .variants
+                .iter()
+                .any(|variant| variant.weight == 700 && !variant.italic)
+        );
+        assert!(inter.variants.iter().any(|variant| variant.italic));
+        let unique: std::collections::HashSet<_> = inter
+            .variants
+            .iter()
+            .map(|variant| (variant.weight, variant.italic))
+            .collect();
+        assert_eq!(unique.len(), inter.variants.len());
+    }
+
+    #[test]
+    fn spanish_acceptance_text_has_composable_glyphs() {
+        let fonts = Fonts::with_system(false);
+        let style = TitleStyle {
+            content: "¡Nuestra historia comienza aquí! ¿Sí, Iñaki y Lucía?".to_owned(),
+            font_family: "Inter".to_owned(),
+            ..style("unused")
+        };
+        let image = render(&fonts, &style, 1280, 720).expect("Spanish title renders");
+        assert!(!image.png.is_empty());
+        assert!(image.block_width > 0 && image.block_height > 0);
     }
 
     /// The bundled face answers by name at every weight the interface uses,

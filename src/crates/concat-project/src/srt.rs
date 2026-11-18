@@ -174,6 +174,34 @@ pub fn title_cues(timeline: &Timeline, track_id: Option<&str>) -> Vec<Cue> {
     cues
 }
 
+/// Whether a text clip was created as a subtitle rather than as a title
+/// card. The role lives in the clip's forward-compatible metadata so 0.2.x
+/// projects keep opening without a schema migration.
+pub fn is_subtitle(clip: &crate::model::Clip) -> bool {
+    clip.kind == ClipKind::Text
+        && clip.extra.get("role").and_then(serde_json::Value::as_str) == Some("subtitle")
+}
+
+/// Explicit subtitle cues in timeline order. New projects use this instead
+/// of guessing from the lane with the most titles; an empty result tells the
+/// caller to use the legacy heuristic for older projects.
+pub fn subtitle_cues(timeline: &Timeline) -> Vec<Cue> {
+    let mut cues: Vec<Cue> = timeline
+        .clips
+        .iter()
+        .filter(|clip| is_subtitle(clip))
+        .filter_map(|clip| {
+            Some(Cue {
+                start: clip.start,
+                end: clip.start + clip.duration,
+                text: clip.text.as_ref()?.content.clone(),
+            })
+        })
+        .collect();
+    cues.sort_by(|a, b| a.start.total_cmp(&b.start));
+    cues
+}
+
 /// The lane with the most titles on it - the first such lane, top down,
 /// when two have as many - or None when the timeline has no title.
 ///
@@ -213,8 +241,10 @@ pub fn title_lanes(timeline: &Timeline) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cue, busiest_title_lane, parse, title_cues, title_lanes, write};
-    use crate::commands::Command;
+    use super::{
+        Cue, busiest_title_lane, is_subtitle, parse, subtitle_cues, title_cues, title_lanes, write,
+    };
+    use crate::commands::{ClipPatch, Command};
     use crate::editor::Editor;
     use crate::model::TextStyle;
 
@@ -223,6 +253,117 @@ mod tests {
             start,
             end,
             text: text.to_owned(),
+        }
+    }
+
+    #[test]
+    fn explicit_subtitles_are_not_confused_with_title_cards() {
+        let mut editor = Editor::new();
+        editor
+            .apply(Command::AddTextClip {
+                track_id: None,
+                above: true,
+                start: 0.0,
+                style: Some(TextStyle {
+                    content: "OPENING TITLE".to_owned(),
+                    ..TextStyle::default()
+                }),
+                duration: Some(3.0),
+                offset_y: None,
+            })
+            .unwrap();
+        let subtitle_id = editor
+            .apply(Command::AddSubtitleClip {
+                track_id: None,
+                start: 1.0,
+                style: Some(TextStyle {
+                    content: "¿Dónde está Lucía?".to_owned(),
+                    ..TextStyle::default()
+                }),
+                duration: Some(1.5),
+                offset_y: Some(0.3),
+            })
+            .unwrap()
+            .created_id
+            .expect("subtitle id");
+        let timeline = editor.project().active();
+        assert!(is_subtitle(timeline.clip(&subtitle_id).unwrap()));
+        assert_eq!(
+            subtitle_cues(timeline),
+            [cue(1.0, 2.5, "¿Dónde está Lucía?")]
+        );
+    }
+
+    #[test]
+    fn subtitle_track_style_is_one_atomic_undo_step() {
+        let mut editor = Editor::new();
+        let mut ids = Vec::new();
+        for (start, words) in [(0.0, "Primera línea"), (2.0, "Segunda línea")] {
+            ids.push(
+                editor
+                    .apply(Command::AddSubtitleClip {
+                        track_id: None,
+                        start,
+                        style: Some(TextStyle {
+                            content: words.to_owned(),
+                            ..TextStyle::default()
+                        }),
+                        duration: Some(1.5),
+                        offset_y: Some(0.3),
+                    })
+                    .unwrap()
+                    .created_id
+                    .unwrap(),
+            );
+        }
+        let before = editor.project().clone();
+        let commands = ids
+            .iter()
+            .map(|id| {
+                let clip = editor.project().active().clip(id).unwrap();
+                let mut style = clip.text.clone().unwrap();
+                style.font_family = "DM Serif Display".to_owned();
+                style.font_weight = 400.0;
+                Command::UpdateClip {
+                    clip_id: id.clone(),
+                    patch: ClipPatch {
+                        text: Some(Some(style)),
+                        ..ClipPatch::default()
+                    },
+                }
+            })
+            .collect();
+        editor.apply(Command::Batch { commands }).unwrap();
+        for id in &ids {
+            assert_eq!(
+                editor
+                    .project()
+                    .active()
+                    .clip(id)
+                    .unwrap()
+                    .text
+                    .as_ref()
+                    .unwrap()
+                    .font_family,
+                "DM Serif Display"
+            );
+        }
+        assert!(editor.undo());
+        assert_eq!(editor.project(), &before);
+        assert!(editor.redo());
+        for id in &ids {
+            assert_eq!(
+                editor
+                    .project()
+                    .active()
+                    .clip(id)
+                    .unwrap()
+                    .text
+                    .as_ref()
+                    .unwrap()
+                    .font_family,
+                "DM Serif Display"
+            );
         }
     }
 
