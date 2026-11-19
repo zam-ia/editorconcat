@@ -121,6 +121,33 @@ pub enum ColorRange {
     Full,
 }
 
+/// How an SDR picture must be interpreted before creative grading. `Auto`
+/// preserves the file's existing behaviour and is deliberately omitted from
+/// old documents. Log sources are explicit because ordinary container colour
+/// tags do not reliably distinguish the two Sony gamuts.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SourceColor {
+    /// Trust the decoder metadata. For existing projects this is the only
+    /// value, so opening them cannot silently change their appearance.
+    #[default]
+    Auto,
+    /// Rec.709 SDR, explicitly confirmed by the user.
+    Rec709,
+    /// Sony S-Log3 transfer with S-Gamut3.Cine primaries.
+    SonySlog3Sgamut3Cine,
+    /// Sony S-Log3 transfer with S-Gamut3 primaries.
+    SonySlog3Sgamut3,
+}
+
+impl SourceColor {
+    /// Whether decoder metadata, rather than an explicit override, wins.
+    pub fn is_auto(&self) -> bool {
+        *self == SourceColor::Auto
+    }
+}
+
 /// One entry in the media bin: a file the user imported, plus what the host's
 /// probe learned about it. The probe metadata is stored, not re-derived, so a
 /// document opens meaningfully even when the file itself is missing.
@@ -182,6 +209,11 @@ pub struct MediaItem {
     #[serde(default, skip_serializing_if = "ColorSpace::is_sdr")]
     #[serde(deserialize_with = "wire::color_space")]
     pub color_space: ColorSpace,
+    /// Manual input transform. Auto leaves the decoder's existing result
+    /// untouched; explicit Sony Log choices add one technical GPU transform
+    /// before the clip's editable creative effects.
+    #[serde(default, skip_serializing_if = "SourceColor::is_auto")]
+    pub source_color: SourceColor,
     /// Where the file came from when the editor made it; see
     /// [`MediaOrigin`]. Absent, and left out of the document, for an
     /// import, and read as absent when it names an origin this build does
@@ -208,7 +240,32 @@ fn is_false(value: &bool) -> bool {
     !value
 }
 
-/// A lane. Deliberately untyped: any media goes on any track.
+/// The persistent editorial role of a lane. Legacy accepts every clip and is
+/// the compatibility view for projects written before typed tracks existed.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TrackRole {
+    /// Untyped 0.2.x lane; accepts every clip and is never reordered.
+    #[default]
+    Legacy,
+    /// V1, the magnetic visual spine of a new timeline.
+    MainVisual,
+    /// A visual overlay lane above V1.
+    Visual,
+    /// An independently mixed audio lane below V1.
+    Audio,
+}
+
+impl TrackRole {
+    /// Whether the lane uses the backwards-compatible untyped semantics.
+    pub fn is_legacy(&self) -> bool {
+        *self == TrackRole::Legacy
+    }
+}
+
+/// A lane. New projects carry an explicit role; old documents deserialize as
+/// `Legacy` and retain the permissive placement rules they were authored with.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Track {
@@ -219,6 +276,15 @@ pub struct Track {
     pub visible: bool,
     /// Audio on this track is silent when true.
     pub muted: bool,
+    /// V1, an upper visual lane, an audio lane, or compatibility mode.
+    #[serde(default, skip_serializing_if = "TrackRole::is_legacy")]
+    pub role: TrackRole,
+    /// Optional user label. Empty keeps the generated V/A label.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    /// Whether ripples on V1 carry this lane's later clips with them.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub sync_lock: bool,
     /// Fields this build does not know, kept so they round-trip.
     #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
     pub extra: Map<String, Value>,
@@ -230,7 +296,28 @@ impl Default for Track {
             id: String::new(),
             visible: true,
             muted: false,
+            role: TrackRole::Legacy,
+            name: String::new(),
+            sync_lock: false,
             extra: Map::new(),
+        }
+    }
+}
+
+impl Track {
+    /// Whether this lane accepts a clip without changing its role. Legacy
+    /// lanes remain permissive; typed lanes keep picture and sound regions
+    /// distinct. Video is visual even when it also carries embedded audio.
+    pub fn accepts(&self, kind: ClipKind) -> bool {
+        match self.role {
+            TrackRole::Legacy => true,
+            // The historic bottom lane accepted picture clips, and many 0.2.x
+            // projects rely on that. Keep that direction permissive while the
+            // visual lanes still reject audio, so loading and rearranging old
+            // edits stays lossless.
+            TrackRole::Audio => true,
+            TrackRole::MainVisual => matches!(kind, ClipKind::Video | ClipKind::Image),
+            TrackRole::Visual => kind != ClipKind::Audio,
         }
     }
 }
@@ -2081,6 +2168,18 @@ impl Default for Clip {
 }
 
 impl Clip {
+    /// The internal timeline this placeholder represents, when it is a
+    /// non-destructive compound clip. Kept in flattened metadata so older
+    /// builds preserve it even though they cannot open it.
+    pub fn compound_timeline_id(&self) -> Option<&str> {
+        self.extra.get("compoundTimelineId").and_then(Value::as_str)
+    }
+
+    /// Whether this clip is an editable compound placeholder.
+    pub fn is_compound(&self) -> bool {
+        self.compound_timeline_id().is_some()
+    }
+
     /// A clip with nothing set but what names and places it: unity gain,
     /// scale and speed, no fades, no effects, no keys. Every constructor
     /// starts here and sets the few fields its kind needs, so a field added
@@ -2789,12 +2888,33 @@ impl Project {
                 name: "Timeline 1".to_owned(),
                 video,
                 background: Background::None,
-                tracks: (1..=4)
-                    .map(|number| Track {
-                        id: format!("T{number}"),
+                // Stored bottom first: A1, then the magnetic spine V1, then
+                // two overlay lanes. More lanes are minted dynamically.
+                tracks: [
+                    Track {
+                        id: "T1".to_owned(),
+                        role: TrackRole::Audio,
                         ..Track::default()
-                    })
-                    .collect(),
+                    },
+                    Track {
+                        id: "T2".to_owned(),
+                        role: TrackRole::MainVisual,
+                        ..Track::default()
+                    },
+                    Track {
+                        id: "T3".to_owned(),
+                        role: TrackRole::Visual,
+                        sync_lock: true,
+                        ..Track::default()
+                    },
+                    Track {
+                        id: "T4".to_owned(),
+                        role: TrackRole::Visual,
+                        sync_lock: true,
+                        ..Track::default()
+                    },
+                ]
+                .into(),
                 clips: Vec::new(),
                 extra: Map::new(),
             })],

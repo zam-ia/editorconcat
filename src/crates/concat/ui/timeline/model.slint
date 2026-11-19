@@ -50,6 +50,11 @@ export enum TrackSize { auto, small, medium, large }
 /// the other.
 export struct TrackData {
     id: string,
+    /// Generated V1/V2/A1 label or the user's track name.
+    label: string,
+    /// 0 legacy, 1 main visual, 2 visual overlay, 3 audio.
+    role: int,
+    sync-lock: bool,
     visible: bool,
     muted: bool,
     /// What the header's dropdown shows, and what `height` was resolved from.

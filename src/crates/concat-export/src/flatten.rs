@@ -16,7 +16,8 @@
 use std::path::Path;
 
 use concat_project::model::{
-    Background, ClipKind as ModelClipKind, KeyProperty, MediaKind, Project, Timeline,
+    AppliedFilter, Background, ClipKind as ModelClipKind, KeyProperty, MediaKind, Project,
+    SourceColor, Timeline,
 };
 
 use crate::chains::audio_filter_chain;
@@ -45,127 +46,208 @@ pub fn flatten_timeline_in(
     // Found once: asked of every clip, it is a walk of every clip.
     let lane = timeline.background_lane();
 
-    timeline
-        .clips
-        .iter()
-        .filter_map(|clip| {
-            // Titles and shapes rasterise separately and rejoin as stills;
-            // see concat-host's titles.
-            if matches!(clip.kind, ModelClipKind::Text | ModelClipKind::Shape) {
-                return None;
+    // Compound placeholders have no media of their own. Resolve their
+    // internal timeline lazily into the same export list and window it by the
+    // compound's trim. No proxy or intermediate file is produced.
+    let mut compounds = Vec::new();
+    for parent in timeline.clips.iter().filter(|clip| clip.is_compound()) {
+        let Some(internal_id) = parent.compound_timeline_id() else {
+            continue;
+        };
+        let Some(internal) = project.timelines.iter().find(|tl| tl.id == internal_id) else {
+            continue;
+        };
+        // P1.4 deliberately refuses nested compounds at creation. A
+        // hand-edited circular/nested document therefore fails soft instead
+        // of recursively exhausting the stack.
+        if internal.clips.iter().any(|clip| clip.is_compound()) {
+            continue;
+        }
+        let Some(parent_track) = timeline
+            .tracks
+            .iter()
+            .position(|track| track.id == parent.track_id)
+        else {
+            continue;
+        };
+        let visible_from = parent.start;
+        let visible_to = parent.start + parent.duration;
+        let origin = parent.start - parent.source_start;
+        let track = &timeline.tracks[parent_track];
+        for mut child in flatten_timeline_in(project, Some(internal_id), project_dir) {
+            let raw_start = origin + child.start;
+            let raw_end = raw_start + child.duration;
+            let from = raw_start.max(visible_from);
+            let to = raw_end.min(visible_to);
+            if to <= from {
+                continue;
             }
-            let index = timeline
-                .tracks
-                .iter()
-                .position(|track| track.id == clip.track_id)?;
-            let track = &timeline.tracks[index];
+            let trim = from - raw_start;
+            child.source_start += trim * child.speed;
+            child.start = from;
+            child.duration = to - from;
+            child.track += parent_track;
+            child.hidden |= !track.visible;
+            child.muted |= track.muted;
+            child.volume *= parent.volume;
+            child.opacity *= parent.opacity;
+            child.scale *= parent.scale;
+            child.offset_x += parent.offset_x;
+            child.offset_y += parent.offset_y;
+            child.rotation += parent.rotation;
+            child.effects.extend(parent.video_effects.clone());
+            compounds.push(child);
+        }
+    }
 
-            // A layer: no file, a chain over the stack beneath its track,
-            // its opacity the strength and its fades the ramps.
-            if clip.kind == ModelClipKind::Layer {
-                return Some(ExportClip {
-                    hidden: !track.visible,
-                    muted: true,
-                    volume: 0.0,
-                    fade_in: clip.fade_in,
-                    fade_out: clip.fade_out,
-                    effects: clip.video_effects.clone(),
-                    opacity: clip.opacity,
-                    has_audio: Some(false),
-                    ..ExportClip::blank(ClipKind::Layer, clip.start, clip.duration, index)
-                });
-            }
+    compounds.extend(timeline.clips.iter().filter_map(|clip| {
+        if clip.is_compound() {
+            return None;
+        }
+        // Titles and shapes rasterise separately and rejoin as stills;
+        // see concat-host's titles.
+        if matches!(clip.kind, ModelClipKind::Text | ModelClipKind::Shape) {
+            return None;
+        }
+        let index = timeline
+            .tracks
+            .iter()
+            .position(|track| track.id == clip.track_id)?;
+        let track = &timeline.tracks[index];
 
-            let media = project.media.iter().find(|item| item.id == clip.media_id)?;
-
-            let kind = match clip.kind {
-                ModelClipKind::Video => ClipKind::Video,
-                ModelClipKind::Audio => ClipKind::Audio,
-                ModelClipKind::Image => ClipKind::Image,
-                // Handled above; unreachable spelled as a skip so a new
-                // kind fails soft.
-                ModelClipKind::Text | ModelClipKind::Layer | ModelClipKind::Shape => return None,
-            };
-            Some(ExportClip {
-                path: media.path.clone(),
-                audio_stream: clip.audio_stream,
-                color_range: media.color_range,
-                source_start: clip.source_start,
+        // A layer: no file, a chain over the stack beneath its track,
+        // its opacity the strength and its fades the ramps.
+        if clip.kind == ModelClipKind::Layer {
+            return Some(ExportClip {
                 hidden: !track.visible,
-                muted: track.muted || clip.muted == Some(true),
-                volume: export_base(clip, KeyProperty::Volume),
+                muted: true,
+                volume: 0.0,
                 fade_in: clip.fade_in,
                 fade_out: clip.fade_out,
-                filter_chain: audio_filter_chain(&clip.filters),
-                speed: clip.speed,
-                preserve_pitch: clip.preserve_pitch,
-                speed_curve: clip
-                    .speed_curve
-                    .as_deref()
-                    .unwrap_or(&[])
-                    .iter()
-                    .map(|point| (point.at, point.speed))
-                    .collect(),
-                animation: export_keys(clip),
-                flip_h: clip.flip_h,
-                flip_v: clip.flip_v,
-                blend: clip.blend.clone(),
-                crop: clip
-                    .crop
-                    .filter(|crop| !crop.is_none())
-                    .map(|crop| [crop.left, crop.top, crop.right, crop.bottom]),
                 effects: clip.video_effects.clone(),
-                scale: export_base(clip, KeyProperty::Scale),
-                offset_x: export_base(clip, KeyProperty::OffsetX),
-                offset_y: export_base(clip, KeyProperty::OffsetY),
-                rotation: export_base(clip, KeyProperty::Rotation),
-                stretch_x: clip.stretch_x,
-                stretch_y: clip.stretch_y,
-                opacity: export_base(clip, KeyProperty::Opacity),
-                // Passed through unconditionally: `resolve_transitions` is
-                // the one adjacency judge (frame/2 tolerance). A fixed
-                // 1/60 s gate here would agree at 30fps and disagree at
-                // every other rate; resolving is the kinder read of what
-                // the user placed.
-                transition: clip
-                    .transition_in
-                    .as_ref()
-                    .map(|transition| TransitionSpec {
-                        kind: transition.id.clone(),
-                        duration: transition.duration,
-                    }),
-                media_width: media.width,
-                media_height: media.height,
-                media_duration: media.duration,
-                has_audio: Some(media.has_audio),
-                backdrop: timeline
-                    .background_on(clip, lane)
-                    .and_then(|background| backdrop_of(project, background)),
-                cutout: clip.cutout.clone(),
-                // Pictures only: a mask on a clip that is all sound would
-                // keep part of nothing.
-                mask: clip.mask.filter(|_| kind != ClipKind::Audio),
-                mask_dir: match (&clip.cutout, project_dir) {
-                    (Some(cutout), Some(dir)) => {
-                        concat_vision::mask_dir(dir, &media.path, cutout.subject)
-                            .to_string_lossy()
-                            .into_owned()
-                    }
-                    _ => String::new(),
-                },
-                stabilize: clip.stabilize.filter(|_| kind == ClipKind::Video),
-                motion_dir: match (&clip.stabilize, project_dir) {
-                    (Some(_), Some(dir)) if kind == ClipKind::Video => {
-                        concat_vision::stabilize::motion_dir(dir, &media.path)
-                            .to_string_lossy()
-                            .into_owned()
-                    }
-                    _ => String::new(),
-                },
-                ..ExportClip::blank(kind, clip.start, clip.duration, index)
-            })
+                opacity: clip.opacity,
+                has_audio: Some(false),
+                ..ExportClip::blank(ClipKind::Layer, clip.start, clip.duration, index)
+            });
+        }
+
+        let media = project.media.iter().find(|item| item.id == clip.media_id)?;
+
+        let kind = match clip.kind {
+            ModelClipKind::Video => ClipKind::Video,
+            ModelClipKind::Audio => ClipKind::Audio,
+            ModelClipKind::Image => ClipKind::Image,
+            // Handled above; unreachable spelled as a skip so a new
+            // kind fails soft.
+            ModelClipKind::Text | ModelClipKind::Layer | ModelClipKind::Shape => return None,
+        };
+        Some(ExportClip {
+            path: media.path.clone(),
+            audio_stream: clip.audio_stream,
+            color_range: media.color_range,
+            source_start: clip.source_start,
+            hidden: !track.visible,
+            muted: track.muted || clip.muted == Some(true),
+            volume: export_base(clip, KeyProperty::Volume),
+            fade_in: clip.fade_in,
+            fade_out: clip.fade_out,
+            filter_chain: audio_filter_chain(&clip.filters),
+            speed: clip.speed,
+            preserve_pitch: clip.preserve_pitch,
+            speed_curve: clip
+                .speed_curve
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .map(|point| (point.at, point.speed))
+                .collect(),
+            animation: export_keys(clip),
+            flip_h: clip.flip_h,
+            flip_v: clip.flip_v,
+            blend: clip.blend.clone(),
+            crop: clip
+                .crop
+                .filter(|crop| !crop.is_none())
+                .map(|crop| [crop.left, crop.top, crop.right, crop.bottom]),
+            effects: effects_for(media.source_color, &clip.video_effects),
+            scale: export_base(clip, KeyProperty::Scale),
+            offset_x: export_base(clip, KeyProperty::OffsetX),
+            offset_y: export_base(clip, KeyProperty::OffsetY),
+            rotation: export_base(clip, KeyProperty::Rotation),
+            stretch_x: clip.stretch_x,
+            stretch_y: clip.stretch_y,
+            opacity: export_base(clip, KeyProperty::Opacity),
+            // Passed through unconditionally: `resolve_transitions` is
+            // the one adjacency judge (frame/2 tolerance). A fixed
+            // 1/60 s gate here would agree at 30fps and disagree at
+            // every other rate; resolving is the kinder read of what
+            // the user placed.
+            transition: clip
+                .transition_in
+                .as_ref()
+                .map(|transition| TransitionSpec {
+                    kind: transition.id.clone(),
+                    duration: transition.duration,
+                }),
+            media_width: media.width,
+            media_height: media.height,
+            media_duration: media.duration,
+            has_audio: Some(media.has_audio),
+            backdrop: timeline
+                .background_on(clip, lane)
+                .and_then(|background| backdrop_of(project, background)),
+            cutout: clip.cutout.clone(),
+            // Pictures only: a mask on a clip that is all sound would
+            // keep part of nothing.
+            mask: clip.mask.filter(|_| kind != ClipKind::Audio),
+            mask_dir: match (&clip.cutout, project_dir) {
+                (Some(cutout), Some(dir)) => {
+                    concat_vision::mask_dir(dir, &media.path, cutout.subject)
+                        .to_string_lossy()
+                        .into_owned()
+                }
+                _ => String::new(),
+            },
+            stabilize: clip.stabilize.filter(|_| kind == ClipKind::Video),
+            motion_dir: match (&clip.stabilize, project_dir) {
+                (Some(_), Some(dir)) if kind == ClipKind::Video => {
+                    concat_vision::stabilize::motion_dir(dir, &media.path)
+                        .to_string_lossy()
+                        .into_owned()
+                }
+                _ => String::new(),
+            },
+            ..ExportClip::blank(kind, clip.start, clip.duration, index)
         })
-        .collect()
+    }));
+    compounds
+}
+
+/// The technical input transform is derived from media interpretation and
+/// always precedes creative clip effects. Auto and explicit Rec.709 are
+/// intentionally no-ops, preserving old projects and avoiding double Log
+/// conversion. This allocates only while a render/preview request is built.
+fn effects_for(source: SourceColor, creative: &[AppliedFilter]) -> Vec<AppliedFilter> {
+    let mut out = Vec::with_capacity(
+        creative.len()
+            + usize::from(matches!(
+                source,
+                SourceColor::SonySlog3Sgamut3Cine | SourceColor::SonySlog3Sgamut3
+            )),
+    );
+    if matches!(
+        source,
+        SourceColor::SonySlog3Sgamut3Cine | SourceColor::SonySlog3Sgamut3
+    ) {
+        let mut technical = AppliedFilter::new("concat.slog3-to-rec709");
+        technical.params.insert(
+            "gamut".to_owned(),
+            f64::from(source == SourceColor::SonySlog3Sgamut3),
+        );
+        out.push(technical);
+    }
+    out.extend_from_slice(creative);
+    out
 }
 
 /// A background as it is drawn: a blur and a colour as they are, a still
@@ -439,5 +521,75 @@ mod tests {
         // by asking for a timeline that does not exist.
         assert!(flatten_timeline(editor.project(), None).is_empty());
         assert!(flatten_timeline(editor.project(), Some("nope")).len() <= 1);
+    }
+
+    #[test]
+    fn slog3_input_transform_precedes_creative_effects() {
+        let (mut editor, media_id, clip_id) = project_with_clip();
+        editor
+            .apply(Command::SetMediaSourceColor {
+                media_id,
+                source: SourceColor::SonySlog3Sgamut3Cine,
+            })
+            .expect("interprets source");
+        editor
+            .apply(Command::UpdateClip {
+                clip_id,
+                patch: ClipPatch {
+                    video_effects: Some(vec![AppliedFilter::new("concat.film")]),
+                    ..Default::default()
+                },
+            })
+            .expect("adds look");
+        let flat = flatten_timeline(editor.project(), None);
+        assert_eq!(flat[0].effects[0].id, "concat.slog3-to-rec709");
+        assert_eq!(flat[0].effects[1].id, "concat.film");
+        assert_eq!(flat[0].effects[0].params.get("gamut"), Some(&0.0));
+    }
+
+    #[test]
+    fn compound_children_flatten_once_inside_the_parent_window() {
+        let (mut editor, media_id, first) = project_with_clip();
+        let track_id = editor.project().active().tracks[2].id.clone();
+        let second = editor
+            .apply(Command::AddClip {
+                media_id,
+                track_id,
+                start: 4.0,
+                ripple: false,
+            })
+            .expect("adds second")
+            .created_id
+            .expect("clip id");
+        let compound = editor
+            .apply(Command::CreateCompoundClip {
+                clip_ids: vec![first, second],
+                name: "Escena".to_owned(),
+            })
+            .expect("creates compound")
+            .created_id
+            .expect("compound id");
+        editor
+            .apply(Command::UpdateClip {
+                clip_id: compound,
+                patch: ClipPatch {
+                    opacity: Some(0.5),
+                    video_effects: Some(vec![AppliedFilter::new("concat.warm")]),
+                    ..Default::default()
+                },
+            })
+            .expect("styles compound");
+
+        let flat = flatten_timeline(editor.project(), None);
+        assert_eq!(
+            flat.len(),
+            2,
+            "the placeholder is not rendered a second time"
+        );
+        assert!(flat.iter().all(|clip| (clip.opacity - 0.5).abs() < 1e-9));
+        assert!(
+            flat.iter()
+                .all(|clip| clip.effects.last().unwrap().id == "concat.warm")
+        );
     }
 }

@@ -1,0 +1,21 @@
+format = 2
+
+[effect]
+id = "concat.slog3-to-rec709"
+name = "Sony S-Log3 to Rec.709"
+kind = "filter"
+category = "Technical"
+order = 0
+description = "Technical input transform from Sony S-Log3 to a linear Rec.709 working signal. Injected from the media interpretation, before creative grading."
+
+[[param]]
+key = "gamut"
+group = "Input"
+label = "Sony gamut"
+min = 0
+max = 1
+default = 0
+step = 1
+
+[wgsl]
+entry = "effect.wgsl"

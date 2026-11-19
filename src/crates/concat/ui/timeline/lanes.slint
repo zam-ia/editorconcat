@@ -1377,7 +1377,9 @@ export component Lanes inherits Rectangle {
             y: root.ruler-height + track.top - root.track-scroll;
             width: parent.width;
             height: track.height;
-            background: Math.mod(row, 2) == 0 ? Theme.lane : Theme.lane-alt;
+            background: track.role == 1 ? Theme.accent.with-alpha(0.055)
+                : track.role == 3 ? Theme.lane-alt.with-alpha(0.82)
+                : Math.mod(row, 2) == 0 ? Theme.lane : Theme.lane-alt;
             visible: self.y + track.height > root.ruler-height && self.y < root.height;
 
             Rectangle {

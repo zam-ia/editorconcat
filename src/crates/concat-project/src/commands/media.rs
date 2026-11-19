@@ -42,6 +42,7 @@ pub(super) fn apply(
                 placeholder: false,
                 color_range: None,
                 color_space: item.color_space,
+                source_color: SourceColor::Auto,
                 extra: Default::default(),
             });
             Ok(Outcome {
@@ -187,6 +188,18 @@ pub(super) fn apply(
                 .iter_mut()
                 .find(|item| item.id == media_id)
                 .is_some_and(|item| assign(&mut item.color_range, range));
+            Ok(Outcome {
+                created_id: None,
+                applied,
+            })
+        }
+
+        Command::SetMediaSourceColor { media_id, source } => {
+            let applied = project
+                .media
+                .iter_mut()
+                .find(|item| item.id == media_id)
+                .is_some_and(|item| assign(&mut item.source_color, source));
             Ok(Outcome {
                 created_id: None,
                 applied,

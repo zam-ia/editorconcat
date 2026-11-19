@@ -24,14 +24,31 @@ pub(super) fn apply(
                     .iter()
                     .map(|timeline| timeline.name.clone()),
             );
-            let tracks = (1..=4)
-                .map(|_| Track {
+            let tracks = [
+                Track {
                     id: mint.next("t"),
-                    visible: true,
-                    muted: false,
-                    extra: Default::default(),
-                })
-                .collect();
+                    role: TrackRole::Audio,
+                    ..Track::default()
+                },
+                Track {
+                    id: mint.next("t"),
+                    role: TrackRole::MainVisual,
+                    ..Track::default()
+                },
+                Track {
+                    id: mint.next("t"),
+                    role: TrackRole::Visual,
+                    sync_lock: true,
+                    ..Track::default()
+                },
+                Track {
+                    id: mint.next("t"),
+                    role: TrackRole::Visual,
+                    sync_lock: true,
+                    ..Track::default()
+                },
+            ]
+            .into();
             // Born at the frame of the timeline you were looking at: the
             // likeliest second timeline is another cut of the same picture,
             // and the one that is not is a sheet away from being told so.

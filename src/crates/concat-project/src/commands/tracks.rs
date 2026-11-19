@@ -22,6 +22,13 @@ pub(super) fn apply(
                 id: id.clone(),
                 visible: true,
                 muted: false,
+                role: if bottom {
+                    TrackRole::Audio
+                } else {
+                    TrackRole::Visual
+                },
+                name: String::new(),
+                sync_lock: !bottom,
                 extra: Default::default(),
             };
             // The stack is stored bottom first: the last track is the lane

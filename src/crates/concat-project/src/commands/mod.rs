@@ -15,13 +15,14 @@ use serde::{Deserialize, Serialize};
 use crate::model::{
     AppliedFilter, AudioTrack, Background, Clip, ClipKind, ClipMask, ColorRange, ColorSpace, Crop,
     CustomFont, Cutout, CutoutMode, Enhanced, Framing, KeyEase, KeyProperty, MediaItem, MediaKind,
-    MediaOrigin, Project, ShapeStyle, SpeedPoint, Stabilize, Stroke, TextStyle, Timeline, Track,
-    Transition, VideoSettings,
+    MediaOrigin, Project, ShapeStyle, SourceColor, SpeedPoint, Stabilize, Stroke, TextStyle,
+    Timeline, Track, TrackRole, Transition, VideoSettings,
 };
 
 mod audio;
 mod clips;
 pub use clips::{PlayheadSide, consolidation_clips, delete_to_playhead, why_not_merge};
+mod compounds;
 mod media;
 mod properties;
 mod timelines;
@@ -660,6 +661,21 @@ pub enum Command {
         /// The completed, probed render stored in the project media folder.
         item: NewMedia,
     },
+    /// Moves two or more selected clips into an editable internal timeline
+    /// and replaces them with one compound placeholder.
+    CreateCompoundClip {
+        /// Stable ids of the selected clips, across any compatible lanes.
+        clip_ids: Vec<String>,
+        /// Optional label for the internal timeline and placeholder.
+        #[serde(default)]
+        name: String,
+    },
+    /// Restores a compound's internal clips to the parent timeline and
+    /// removes the internal sequence.
+    DecomposeCompoundClip {
+        /// The compound placeholder on the active parent timeline.
+        clip_id: String,
+    },
     /// Deletes clips from the active timeline. Unknown ids are ignored.
     RemoveClips {
         /// The clips to delete.
@@ -850,6 +866,14 @@ pub enum Command {
         /// own tag.
         range: Option<ColorRange>,
     },
+    /// Overrides the input colour interpretation for one media item. Auto
+    /// restores metadata-driven behaviour.
+    SetMediaSourceColor {
+        /// The bin item whose decoder interpretation is overridden.
+        media_id: String,
+        /// Explicit input transfer/gamut, or [`SourceColor::Auto`].
+        source: SourceColor,
+    },
 }
 
 /// One non-destructive loudness-normalization edit for existing clips.
@@ -917,6 +941,9 @@ pub enum CommandError {
     /// A clip-placing command named a track no longer on the timeline.
     #[error("That track no longer exists.")]
     TrackGone,
+    /// A visual clip was sent to an audio lane or sound to a visual lane.
+    #[error("That clip type is not compatible with the destination track.")]
+    IncompatibleTrack,
     /// A first-free-track placement found a timeline with no tracks at all.
     #[error("There are no tracks.")]
     NoTracks,
@@ -927,6 +954,12 @@ pub enum CommandError {
         /// The [`why_not_merge`] sentence, verbatim.
         reason: String,
     },
+    #[error("Select two or more distinct clips to create a compound clip.")]
+    /// Compound creation requires a distinct non-nested multi-selection.
+    CannotCompound,
+    #[error("That clip is not an editable compound clip.")]
+    /// The requested placeholder or internal timeline does not exist.
+    NotCompound,
     /// [`Command::RemoveTrack`] would have deleted the last track.
     #[error("A timeline needs at least one track.")]
     LastTrack,
@@ -1262,7 +1295,8 @@ pub fn apply(
         | Command::AddFont { .. }
         | Command::RemoveFont { .. }
         | Command::UpdateMediaPath { .. }
-        | Command::SetMediaColorRange { .. }) => media::apply(project, mint, command),
+        | Command::SetMediaColorRange { .. }
+        | Command::SetMediaSourceColor { .. }) => media::apply(project, mint, command),
         command @ (Command::AddClip { .. }
         | Command::AddClipAtFirstFree { .. }
         | Command::AddClipsInSequence { .. }
@@ -1279,6 +1313,9 @@ pub fn apply(
         | Command::MergeClips { .. }
         | Command::ConsolidateClips { .. }
         | Command::RemoveClips { .. }) => clips::apply(project, mint, command),
+        command @ (Command::CreateCompoundClip { .. } | Command::DecomposeCompoundClip { .. }) => {
+            compounds::apply(project, mint, command)
+        }
         command @ (Command::UpdateClip { .. }
         | Command::SetClipSpeed { .. }
         | Command::SetClipCutout { .. }

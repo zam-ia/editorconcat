@@ -26,7 +26,7 @@ use concat_core::shader::RevealMap;
 
 use concat_export::{ClipKind, ExportClip};
 use concat_project::model::{
-    ClipKind as ModelClipKind, Project, ShapeGradientKind, ShapeKind, ShapeStyle, TextAlign,
+    Clip, ClipKind as ModelClipKind, Project, ShapeGradientKind, ShapeKind, ShapeStyle, TextAlign,
     TextStyle,
 };
 use concat_text::{Align, Figure, Fonts, TitleStyle, WordRect};
@@ -226,8 +226,79 @@ impl Titles {
             self.live.lock().unwrap_or_else(|e| e.into_inner()).begin();
         }
         let timeline = project.active();
-        let mut out = Vec::new();
+        // Titles inside a compound are painted by the same cache as ordinary
+        // titles, then windowed and transformed by the parent. This keeps
+        // preview and export on the same structural path without baking a
+        // compound to an intermediate movie.
+        let mut visible: Vec<(Clip, usize, bool)> = Vec::new();
         for clip in &timeline.clips {
+            if !matches!(clip.kind, ModelClipKind::Text | ModelClipKind::Shape) {
+                continue;
+            }
+            let Some(index) = timeline
+                .tracks
+                .iter()
+                .position(|track| track.id == clip.track_id)
+            else {
+                continue;
+            };
+            visible.push((Clip::clone(clip), index, !timeline.tracks[index].visible));
+        }
+        for parent in timeline.clips.iter().filter(|clip| clip.is_compound()) {
+            let Some(internal_id) = parent.compound_timeline_id() else {
+                continue;
+            };
+            let Some(internal) = project.timelines.iter().find(|item| item.id == internal_id)
+            else {
+                continue;
+            };
+            if internal.clips.iter().any(|clip| clip.is_compound()) {
+                continue;
+            }
+            let Some(parent_track) = timeline
+                .tracks
+                .iter()
+                .position(|track| track.id == parent.track_id)
+            else {
+                continue;
+            };
+            let from = parent.start;
+            let to = parent.start + parent.duration;
+            let origin = parent.start - parent.source_start;
+            for child in internal
+                .clips
+                .iter()
+                .filter(|clip| matches!(clip.kind, ModelClipKind::Text | ModelClipKind::Shape))
+            {
+                let Some(inner_track) = internal
+                    .tracks
+                    .iter()
+                    .position(|track| track.id == child.track_id)
+                else {
+                    continue;
+                };
+                let raw_start = origin + child.start;
+                let shown_start = raw_start.max(from);
+                let shown_end = (raw_start + child.duration).min(to);
+                if shown_end <= shown_start {
+                    continue;
+                }
+                let mut child = Clip::clone(child);
+                child.start = shown_start;
+                child.duration = shown_end - shown_start;
+                child.opacity *= parent.opacity;
+                child.scale *= parent.scale;
+                child.offset_x += parent.offset_x;
+                child.offset_y += parent.offset_y;
+                child.rotation += parent.rotation;
+                child.video_effects.extend(parent.video_effects.clone());
+                let hidden =
+                    !timeline.tracks[parent_track].visible || !internal.tracks[inner_track].visible;
+                visible.push((child, parent_track + inner_track, hidden));
+            }
+        }
+        let mut out = Vec::new();
+        for (clip, index, hidden) in &visible {
             let (text, shape);
             let painting = match clip.kind {
                 ModelClipKind::Text => {
@@ -240,14 +311,6 @@ impl Titles {
                 }
                 _ => continue,
             };
-            let Some(index) = timeline
-                .tracks
-                .iter()
-                .position(|track| track.id == clip.track_id)
-            else {
-                continue;
-            };
-            let track = &timeline.tracks[index];
             let painted = if live {
                 self.painted_live(project, painting, width, height)
                     .map(|(path, art, frame)| (path, art, Some(frame)))
@@ -266,7 +329,7 @@ impl Titles {
                 clip_id: clip.id.clone(),
                 clip: ExportClip {
                     path: path.to_string_lossy().into_owned(),
-                    hidden: !track.visible,
+                    hidden: *hidden,
                     muted: true,
                     volume: 0.0,
                     animation: concat_export::flatten::export_keys(clip),
@@ -333,7 +396,7 @@ impl Titles {
                         Painting::Title(_) => Some(Arc::clone(&art.reveal)),
                         Painting::Shape(_) => None,
                     },
-                    ..ExportClip::blank(ClipKind::Image, clip.start, clip.duration, index)
+                    ..ExportClip::blank(ClipKind::Image, clip.start, clip.duration, *index)
                 },
                 block: art.block,
                 offset: art.offset,

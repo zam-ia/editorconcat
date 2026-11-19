@@ -9782,6 +9782,39 @@ impl Studio {
         );
 
         let timeline = self.timeline();
+        let mut visual = 2;
+        let mut audio = 1;
+        let mut legacy = 1;
+        let labels: std::collections::HashMap<&str, (String, i32)> = timeline
+            .tracks
+            .iter()
+            .map(|lane| {
+                let (generated, role) = match lane.role {
+                    model::TrackRole::MainVisual => ("V1".to_owned(), 1),
+                    model::TrackRole::Visual => {
+                        let label = format!("V{visual}");
+                        visual += 1;
+                        (label, 2)
+                    }
+                    model::TrackRole::Audio => {
+                        let label = format!("A{audio}");
+                        audio += 1;
+                        (label, 3)
+                    }
+                    model::TrackRole::Legacy => {
+                        let label = format!("T{legacy}");
+                        legacy += 1;
+                        (label, 0)
+                    }
+                };
+                let shown = if lane.name.is_empty() {
+                    generated
+                } else {
+                    lane.name.clone()
+                };
+                (lane.id.as_str(), (shown, role))
+            })
+            .collect();
         let mut top = 0.0;
         sync(
             &models.tracks,
@@ -9791,8 +9824,15 @@ impl Studio {
                 .rev()
                 .map(|lane| {
                     let height = self.lane_height(lane);
+                    let (label, role) = labels
+                        .get(lane.id.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| (lane.id.clone(), 0));
                     let row = TrackData {
                         id: lane.id.as_str().into(),
+                        label: label.into(),
+                        role,
+                        sync_lock: lane.sync_lock,
                         visible: lane.visible,
                         muted: lane.muted,
                         locked: self.locked(&lane.id),
@@ -12198,6 +12238,13 @@ impl Studio {
                 self.merge_blocked().is_none(),
             ),
             action(
+                "compound-create",
+                "Crear clip compuesto".into(),
+                Glyph::Merge,
+                "",
+                self.selection.len() >= 2 && !locked,
+            ),
+            action(
                 "freeze",
                 "Freeze frame".into(),
                 Glyph::Frame,
@@ -12218,6 +12265,23 @@ impl Studio {
             ),
             rule(),
         ];
+        if clip.is_compound() {
+            rows.push(action(
+                "compound-open",
+                "Abrir clip compuesto".into(),
+                Glyph::Frame,
+                "",
+                true,
+            ));
+            rows.push(action(
+                "compound-decompose",
+                "Descomponer clip compuesto".into(),
+                Glyph::Split,
+                "",
+                !locked,
+            ));
+            rows.push(rule());
+        }
         // The picture sized to the frame, whole or covering it: beside the
         // inspector's two buttons, where a vertical cut is assembled clip
         // by clip.
@@ -12571,6 +12635,38 @@ impl Studio {
                 range == Some(model::ColorRange::Full),
             ));
             rows.push(rule());
+
+            rows.push(MenuItemData {
+                label: "COLOR DE ORIGEN".into(),
+                kind: MenuRow::Label,
+                ..Default::default()
+            });
+            let source = item.source_color;
+            rows.push(check(
+                "source-auto",
+                "Automático / metadata".into(),
+                "",
+                source == model::SourceColor::Auto,
+            ));
+            rows.push(check(
+                "source-rec709",
+                "Rec.709 SDR".into(),
+                "",
+                source == model::SourceColor::Rec709,
+            ));
+            rows.push(check(
+                "source-slog3-cine",
+                "Sony S-Log3 / S-Gamut3.Cine".into(),
+                "",
+                source == model::SourceColor::SonySlog3Sgamut3Cine,
+            ));
+            rows.push(check(
+                "source-slog3",
+                "Sony S-Log3 / S-Gamut3".into(),
+                "",
+                source == model::SourceColor::SonySlog3Sgamut3,
+            ));
+            rows.push(rule());
         }
         rows.push(action("remove", t("common.remove"), Glyph::Trash, true));
         rows
@@ -12589,6 +12685,10 @@ impl Studio {
             media_id: id.to_owned(),
             range,
         };
+        let source = |source| Command::SetMediaSourceColor {
+            media_id: id.to_owned(),
+            source,
+        };
         match action {
             "add" => self.place_at_playhead(&format!("media:{row}")),
             "remove" => self.handle(crate::panes::Msg::Media(
@@ -12602,6 +12702,18 @@ impl Studio {
             }
             "range-full" => {
                 self.apply(range(Some(model::ColorRange::Full)));
+            }
+            "source-auto" => {
+                self.apply(source(model::SourceColor::Auto));
+            }
+            "source-rec709" => {
+                self.apply(source(model::SourceColor::Rec709));
+            }
+            "source-slog3-cine" => {
+                self.apply(source(model::SourceColor::SonySlog3Sgamut3Cine));
+            }
+            "source-slog3" => {
+                self.apply(source(model::SourceColor::SonySlog3Sgamut3));
             }
             _ => {}
         }
@@ -13208,6 +13320,30 @@ impl Studio {
                 self.delete_clips_to_playhead(&ids, side);
             }
             "merge" => self.merge(),
+            "compound-create" => {
+                let ids = self.selection.clone();
+                if ids.len() >= 2 {
+                    self.apply(Command::CreateCompoundClip {
+                        clip_ids: ids,
+                        name: "Clip compuesto".to_owned(),
+                    });
+                    self.selection.clear();
+                }
+            }
+            "compound-open" => {
+                if let Some(timeline_id) = clip.compound_timeline_id() {
+                    self.apply(Command::SelectTimeline {
+                        timeline_id: timeline_id.to_owned(),
+                    });
+                    self.selection.clear();
+                }
+            }
+            "compound-decompose" => {
+                self.apply(Command::DecomposeCompoundClip {
+                    clip_id: id.to_owned(),
+                });
+                self.selection.clear();
+            }
             // On the clip that was right-clicked, which becomes the
             // selection, as Enhance's row makes it.
             "fit" | "fill" => {

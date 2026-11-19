@@ -47,7 +47,8 @@ mod tests {
     use crate::doc::DocumentSettings;
     use crate::editor::Editor;
     use crate::model::{
-        AudioTrack, ClipKind, MediaItem, MediaKind, MediaOrigin, Project, TextStyle,
+        AudioTrack, ClipKind, MediaItem, MediaKind, MediaOrigin, Project, SourceColor, TextStyle,
+        TrackRole,
     };
 
     fn media(path: &str, duration: f64, has_audio: bool) -> Command {
@@ -4796,6 +4797,7 @@ mod tests {
             placeholder: false,
             color_range: None,
             color_space: Default::default(),
+            source_color: Default::default(),
             origin: None,
             extra: Default::default(),
         });
@@ -4835,6 +4837,7 @@ mod tests {
             placeholder: false,
             color_range: None,
             color_space: Default::default(),
+            source_color: Default::default(),
             origin: None,
             extra: Default::default(),
         });
@@ -5264,5 +5267,183 @@ mod tests {
             reopened.project().active().clip(&clip_id),
             Some(&normalized)
         );
+    }
+
+    #[test]
+    fn source_colour_interpretation_is_undoable_and_persists() {
+        let mut editor = Editor::new();
+        let media_id = editor
+            .apply(media("/sony-slog3.mp4", 4.0, true))
+            .expect("imports")
+            .created_id
+            .expect("media id");
+        assert_eq!(
+            editor
+                .project()
+                .media_by_id(&media_id)
+                .unwrap()
+                .source_color,
+            SourceColor::Auto
+        );
+
+        editor
+            .apply(Command::SetMediaSourceColor {
+                media_id: media_id.clone(),
+                source: SourceColor::SonySlog3Sgamut3Cine,
+            })
+            .expect("sets source interpretation");
+        assert!(editor.undo());
+        assert_eq!(
+            editor
+                .project()
+                .media_by_id(&media_id)
+                .unwrap()
+                .source_color,
+            SourceColor::Auto
+        );
+        assert!(editor.redo());
+
+        let document = editor.to_document(&settings());
+        let reopened = Editor::from_document(&document).expect("reopens");
+        assert_eq!(
+            reopened
+                .project()
+                .media_by_id(&media_id)
+                .unwrap()
+                .source_color,
+            SourceColor::SonySlog3Sgamut3Cine
+        );
+    }
+
+    #[test]
+    fn new_timelines_expose_audio_spine_and_overlay_roles_without_a_track_limit() {
+        let mut editor = Editor::new();
+        assert_eq!(editor.project().active().tracks[0].role, TrackRole::Audio);
+        assert_eq!(
+            editor.project().active().tracks[1].role,
+            TrackRole::MainVisual
+        );
+        assert_eq!(editor.project().active().tracks[2].role, TrackRole::Visual);
+
+        for _ in 0..20 {
+            editor
+                .apply(Command::AddTrack { bottom: false })
+                .expect("adds visual track");
+            editor
+                .apply(Command::AddTrack { bottom: true })
+                .expect("adds audio track");
+        }
+        let timeline = editor.project().active();
+        assert_eq!(
+            timeline
+                .tracks
+                .iter()
+                .filter(|t| t.role == TrackRole::Visual)
+                .count(),
+            22
+        );
+        assert_eq!(
+            timeline
+                .tracks
+                .iter()
+                .filter(|t| t.role == TrackRole::Audio)
+                .count(),
+            21
+        );
+    }
+
+    #[test]
+    fn compound_clip_round_trips_edits_and_decomposes_atomically() {
+        let (mut editor, media_id, first) = fixture();
+        let overlay_track = editor.project().active().tracks[2].id.clone();
+        let second = editor
+            .apply(Command::AddClip {
+                media_id,
+                track_id: overlay_track,
+                start: 2.0,
+                ripple: false,
+            })
+            .expect("adds overlay")
+            .created_id
+            .expect("clip id");
+        let parent_id = editor.project().active_timeline_id.clone();
+        let compound_id = editor
+            .apply(Command::CreateCompoundClip {
+                clip_ids: vec![first, second],
+                name: "Ceremonia".to_owned(),
+            })
+            .expect("creates compound")
+            .created_id
+            .expect("compound id");
+        let internal_id = editor
+            .project()
+            .active()
+            .clip(&compound_id)
+            .unwrap()
+            .compound_timeline_id()
+            .unwrap()
+            .to_owned();
+        assert_eq!(editor.project().timelines.len(), 2);
+
+        let document = editor.to_document(&settings());
+        let mut reopened = Editor::from_document(&document).expect("reopens compound");
+        reopened
+            .apply(Command::SelectTimeline {
+                timeline_id: internal_id.clone(),
+            })
+            .expect("opens internal timeline");
+        let child = reopened.project().active().clips[0].clone();
+        reopened
+            .apply(Command::MoveClips {
+                moves: vec![ClipMove {
+                    clip_id: child.id.clone(),
+                    start: 1.0,
+                    track_id: child.track_id.clone(),
+                }],
+            })
+            .expect("edits child");
+        assert_eq!(
+            reopened.project().active().clip(&child.id).unwrap().start,
+            1.0
+        );
+
+        reopened
+            .apply(Command::SelectTimeline {
+                timeline_id: parent_id,
+            })
+            .expect("returns to parent");
+        assert!(
+            reopened.project().active().clip(&compound_id).is_some(),
+            "the parent still holds its compound placeholder"
+        );
+        assert_eq!(
+            reopened
+                .project()
+                .active()
+                .clip(&compound_id)
+                .and_then(|clip| clip.compound_timeline_id()),
+            Some(internal_id.as_str()),
+            "the reference survives save/reopen"
+        );
+        assert!(
+            reopened
+                .project()
+                .timelines
+                .iter()
+                .any(|timeline| timeline.id == internal_id),
+            "the internal timeline survives save/reopen"
+        );
+        reopened
+            .apply(Command::DecomposeCompoundClip {
+                clip_id: compound_id.clone(),
+            })
+            .expect("decomposes");
+        assert!(reopened.project().active().clip(&compound_id).is_none());
+        assert_eq!(reopened.project().timelines.len(), 1);
+        assert!(reopened.undo(), "one undo restores the complete compound");
+        assert!(reopened.project().active().clip(&compound_id).is_some());
+        assert_eq!(reopened.project().timelines.len(), 2);
+        assert!(reopened.redo());
+        assert!(reopened.project().active().clip(&compound_id).is_none());
     }
 }

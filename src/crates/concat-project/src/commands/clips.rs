@@ -26,9 +26,7 @@ pub(super) fn apply(
                 .ok_or(CommandError::MediaGone)?
                 .clone();
             let timeline = project.active_mut();
-            if timeline.track(&track_id).is_none() {
-                return Err(CommandError::TrackGone);
-            }
+            timeline.track(&track_id).ok_or(CommandError::TrackGone)?;
             // Magnetic, the lane makes room; otherwise the clip takes the
             // nearest gap it fits, never the top of another clip.
             let start = if ripple {
@@ -53,8 +51,9 @@ pub(super) fn apply(
                 .clone();
             let duration = clip_length(&media);
             let timeline = project.active_mut();
-            let track_id = first_free_track(timeline, start, duration)
-                .unwrap_or_else(|| fresh_track(timeline, mint));
+            let kind = kind_of_media(&media);
+            let track_id = first_free_track_for(timeline, start, duration, kind)
+                .unwrap_or_else(|| fresh_track_for(timeline, mint, kind));
             let id = mint.next("c");
             timeline
                 .clips
@@ -88,12 +87,16 @@ pub(super) fn apply(
             }
             let start = start.max(0.0);
             let total: f64 = items.iter().map(clip_length).sum();
+            let kinds: Vec<ClipKind> = items.iter().map(kind_of_media).collect();
             let timeline = project.active_mut();
             let track_id = match track_id {
                 Some(id) if timeline.track(&id).is_none() => return Err(CommandError::TrackGone),
                 Some(id) => id,
-                None => first_free_track(timeline, start, total)
-                    .unwrap_or_else(|| fresh_track(timeline, mint)),
+                None if kinds.iter().all(|kind| *kind == kinds[0]) => {
+                    first_free_track_for(timeline, start, total, kinds[0])
+                        .unwrap_or_else(|| fresh_track_for(timeline, mint, kinds[0]))
+                }
+                None => return Err(CommandError::IncompatibleTrack),
             };
             let mut at = start;
             let mut first = None;
@@ -280,6 +283,17 @@ pub(super) fn apply(
 
         Command::MoveClips { moves } => {
             let timeline = project.active_mut();
+            for wanted in &moves {
+                let Some(clip) = timeline.clip(&wanted.clip_id) else {
+                    continue;
+                };
+                let Some(track) = timeline.track(&wanted.track_id) else {
+                    continue;
+                };
+                if !track.accepts(clip.kind) {
+                    return Err(CommandError::IncompatibleTrack);
+                }
+            }
             // Onto another clip is never where a move lands: the group goes
             // to the nearest gap that holds it, and a move whose own clips
             // would cover each other stays where it was.
@@ -375,8 +389,11 @@ pub(super) fn apply(
                 }
             };
             if ripple && applied && by != 0.0 {
+                let ripple_tracks = ripple_tracks(timeline, &track_id);
                 for other in timeline.clips_where(|other| {
-                    other.id != clip_id && other.track_id == track_id && other.start >= behind
+                    other.id != clip_id
+                        && ripple_tracks.contains(&other.track_id)
+                        && other.start >= behind
                 }) {
                     other.start = (other.start + by).max(0.0);
                 }
@@ -477,6 +494,7 @@ pub(super) fn apply(
                         placeholder: false,
                         color_range: None,
                         color_space: item.color_space,
+                        source_color: SourceColor::Auto,
                         extra: Default::default(),
                     });
                     id
@@ -601,6 +619,7 @@ pub(super) fn apply(
                         placeholder: false,
                         color_range: None,
                         color_space: item.color_space,
+                        source_color: SourceColor::Auto,
                         extra: Default::default(),
                     });
                     id
@@ -749,7 +768,7 @@ pub(super) fn apply(
             let doomed: HashSet<&str> = clip_ids.iter().map(String::as_str).collect();
             // The spans going, per track, taken before they are gone: the
             // ripple closes exactly these.
-            let removed: Vec<(String, f64, f64)> = timeline
+            let mut removed: Vec<(String, f64, f64)> = timeline
                 .clips
                 .iter()
                 .filter(|clip| doomed.contains(clip.id.as_str()))
@@ -761,6 +780,26 @@ pub(super) fn apply(
                     )
                 })
                 .collect();
+            // A deletion on V1 also closes sync-locked visual lanes, while
+            // independent music and speech remain fixed.
+            let main_spans: Vec<(f64, f64)> = removed
+                .iter()
+                .filter(|(track, _, _)| {
+                    timeline
+                        .track(track)
+                        .is_some_and(|lane| lane.role == TrackRole::MainVisual)
+                })
+                .map(|(_, start, end)| (*start, *end))
+                .collect();
+            if !main_spans.is_empty() {
+                for track in timeline.tracks.iter().filter(|track| track.sync_lock) {
+                    removed.extend(
+                        main_spans
+                            .iter()
+                            .map(|(start, end)| (track.id.clone(), *start, *end)),
+                    );
+                }
+            }
             let clip_count = timeline.clips.len();
             timeline
                 .clips
@@ -823,11 +862,7 @@ fn close_gaps(timeline: &mut Timeline, removed: &[(String, f64, f64)]) {
 }
 
 fn default_clip(id: String, track_id: String, media: &MediaItem, start: f64) -> Clip {
-    let kind = match media.kind {
-        MediaKind::Video => ClipKind::Video,
-        MediaKind::Audio => ClipKind::Audio,
-        MediaKind::Image => ClipKind::Image,
-    };
+    let kind = kind_of_media(media);
     let mut clip = Clip::blank(
         id,
         track_id,
@@ -838,6 +873,14 @@ fn default_clip(id: String, track_id: String, media: &MediaItem, start: f64) -> 
     );
     clip.media_id = media.id.clone();
     clip
+}
+
+fn kind_of_media(media: &MediaItem) -> ClipKind {
+    match media.kind {
+        MediaKind::Video => ClipKind::Video,
+        MediaKind::Audio => ClipKind::Audio,
+        MediaKind::Image => ClipKind::Image,
+    }
 }
 
 /// Makes room on `track_id` for a new clip at `start`: a drop onto the
@@ -863,10 +906,30 @@ fn ripple_room_for(timeline: &mut Timeline, track_id: &str, start: f64, media: &
     if !overlaps {
         return start;
     }
-    for clip in timeline.clips_where(|clip| clip.track_id == track_id && clip.start >= start) {
+    let ripple_tracks = ripple_tracks(timeline, track_id);
+    for clip in
+        timeline.clips_where(|clip| ripple_tracks.contains(&clip.track_id) && clip.start >= start)
+    {
         clip.start += duration;
     }
     start
+}
+
+fn ripple_tracks(timeline: &Timeline, track_id: &str) -> HashSet<String> {
+    let mut tracks = HashSet::from([track_id.to_owned()]);
+    if timeline
+        .track(track_id)
+        .is_some_and(|track| track.role == TrackRole::MainVisual)
+    {
+        tracks.extend(
+            timeline
+                .tracks
+                .iter()
+                .filter(|track| track.sync_lock)
+                .map(|track| track.id.clone()),
+        );
+    }
+    tracks
 }
 
 /// How long a new clip of `media` is: a still's default hold, or the
@@ -889,6 +952,36 @@ fn first_free_track(timeline: &Timeline, start: f64, duration: f64) -> Option<St
         .map(|track| track.id.clone())
 }
 
+fn first_free_track_for(
+    timeline: &Timeline,
+    start: f64,
+    duration: f64,
+    kind: ClipKind,
+) -> Option<String> {
+    timeline
+        .tracks
+        .iter()
+        .find(|track| track.accepts(kind) && timeline.is_free(&track.id, start, duration, &[]))
+        .map(|track| track.id.clone())
+}
+
+fn fresh_track_for(timeline: &mut Timeline, mint: &mut IdMint, kind: ClipKind) -> String {
+    if kind == ClipKind::Audio {
+        let id = mint.next("t");
+        timeline.tracks.insert(
+            0,
+            Track {
+                id: id.clone(),
+                role: TrackRole::Audio,
+                ..Track::default()
+            },
+        );
+        id
+    } else {
+        fresh_track(timeline, mint)
+    }
+}
+
 /// A new, empty lane at the top, for a clip with nowhere else to go.
 fn fresh_track(timeline: &mut Timeline, mint: &mut IdMint) -> String {
     let id = mint.next("t");
@@ -896,6 +989,9 @@ fn fresh_track(timeline: &mut Timeline, mint: &mut IdMint) -> String {
         id: id.clone(),
         visible: true,
         muted: false,
+        role: TrackRole::Visual,
+        name: String::new(),
+        sync_lock: true,
         extra: Default::default(),
     });
     id

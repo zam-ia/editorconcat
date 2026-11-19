@@ -77,6 +77,9 @@ pub(super) fn apply(
                                 id: id.clone(),
                                 visible: true,
                                 muted: false,
+                                role: TrackRole::Audio,
+                                name: String::new(),
+                                sync_lock: false,
                                 extra: Default::default(),
                             });
                             id

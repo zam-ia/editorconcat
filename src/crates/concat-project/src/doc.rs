@@ -264,7 +264,11 @@ fn settle_clip(
     match clip.kind {
         ClipKind::Text | ClipKind::Layer | ClipKind::Shape => clip.media_id.clear(),
         ClipKind::Video | ClipKind::Audio | ClipKind::Image => {
-            if !media.iter().any(|item| item.id == clip.media_id) {
+            // A compound is a visual placeholder backed by an internal
+            // timeline, not by a bin item. Missing/corrupt references fail
+            // soft in the flattener, but the placeholder itself must survive
+            // save/reopen so the user can repair or decompose it.
+            if !clip.is_compound() && !media.iter().any(|item| item.id == clip.media_id) {
                 return None;
             }
         }

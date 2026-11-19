@@ -211,3 +211,21 @@ La arquitectura, tolerancias, valores de referencia y limitaciones están docume
 Quedan deliberadamente fuera de la condición `Probado`: contenedor de título
 multi-elemento, ejes variables arbitrarios, VTT, karaoke por palabra y gestión
 de color scene-referred. No se añadieron controles visuales falsos para ellos.
+
+## Slice P1.4 — color, timeline tipada y clips compuestos
+
+| Contrato P1.4 | Estado | Evidencia |
+|---|---|---|
+| Fuente Rec.709/S-Log3 persistente | Probado | `source_colour_interpretation_is_undoable_and_persists` |
+| Conversión técnica antes del look | Funcional | `flatten` antepone `concat.slog3-to-rec709`; fixtures del shader |
+| Proyectos 0.2.x sin cambio visual | Probado | defaults `Auto`/`Legacy` y suite histórica `concat-project` |
+| V1, overlays y audio con roles | Probado | `new_timelines_expose_audio_spine_and_overlay_roles_without_a_track_limit` |
+| Sync-lock de overlays | Funcional | ripple de V1 expande el conjunto de pistas sincronizadas |
+| Compuesto crear/reabrir/editar/descomponer | Probado | `compound_clip_round_trips_edits_and_decomposes_atomically` |
+| Expansión en preview/export | Funcional | plan de exportación aplana timeline interna y evita doble mezcla |
+| Comparación dedicada de planos | Parcial | scopes existentes; falta visor dividido específico |
+| Estrés 1.000 clips medido | Pendiente | no se declara sin métricas reproducibles |
+
+Detalles y límites: `docs/cinematic-color-pipeline.md`,
+`docs/professional-timeline.md`, `docs/compound-clips.md` y
+`docs/p1-4-validation.md`.

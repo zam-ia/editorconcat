@@ -10,12 +10,9 @@ import { TrackData, TrackSize } from "model.slint";
 
 // The lane switches, in a fixed column beside the lanes.
 //
-// No label on a row: the lanes are untyped, so there is no kind to name, and
-// a lane's place in the stack is the only handle anything needs on it.
-//
-// Both a visibility and a mute toggle on every row, because a track is not
-// typed — the same lane can be carrying a video clip and an mp3 side by side,
-// and each needs its own switch.
+// New projects identify the magnetic spine and the visual/audio regions as
+// V1, V2... and A1, A2.... Legacy lanes keep a neutral T label and both
+// switches so old mixed-track documents retain their behaviour.
 //
 // The column scrolls with the lanes rather than on its own: the offset is the
 // caller's `track-scroll`, so the labels and the lanes cannot drift apart.
@@ -247,6 +244,20 @@ component Header inherits Rectangle {
             // from the switches pressed all day, the way a form keeps
             // Delete away from Save. A narrow column takes the squeeze from
             // the gap, not from either end.
+
+            VerticalLayout {
+                alignment: start;
+                Text {
+                    width: 27px;
+                    height: 26px;
+                    text: root.track.label;
+                    color: root.track.role == 1 ? Theme.accent : Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    font-weight: root.track.role == 1 ? 700 : 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
 
             VerticalLayout {
                 alignment: start;
