@@ -221,7 +221,7 @@ de color scene-referred. No se añadieron controles visuales falsos para ellos.
 | Proyectos 0.2.x sin cambio visual | Probado | defaults `Auto`/`Legacy` y suite histórica `concat-project` |
 | V1, overlays y audio con roles | Probado | `new_timelines_expose_audio_spine_and_overlay_roles_without_a_track_limit` |
 | Migración de proyectos antiguos a A1/V1 | Probado | `an_unambiguous_legacy_stack_reopens_as_a1_v1_and_visual_overlays` |
-| Audio superpuesto en A2 | Probado | `a_second_overlapping_sound_opens_a2_below_and_visual_tracks_refuse_audio` |
+| Audio superpuesto en A2–A6 | Probado | `overlapping_sounds_open_a2_through_a6_and_visual_tracks_refuse_audio` |
 | Sync-lock de overlays | Funcional | ripple de V1 expande el conjunto de pistas sincronizadas |
 | Compuesto crear/reabrir/editar/descomponer | Probado | `compound_clip_round_trips_edits_and_decomposes_atomically` |
 | Expansión en preview/export | Funcional | plan de exportación aplana timeline interna y evita doble mezcla |
@@ -231,3 +231,16 @@ de color scene-referred. No se añadieron controles visuales falsos para ellos.
 Detalles y límites: `docs/cinematic-color-pipeline.md`,
 `docs/professional-timeline.md`, `docs/compound-clips.md` y
 `docs/p1-4-validation.md`.
+
+## Slice P1.4.1 — recuperación de exportación y timeline de producción
+
+| Contrato P1.4.1 | Estado | Evidencia |
+|---|---|---|
+| H.264 acelerado en Windows | Probado | `windows_h264_hardware_mode_leads_with_qsv_and_keeps_x264_fallback`; prueba local de apertura QSV/MF a 1440×2560 |
+| Fallback compatible por CPU | Probado | La lista termina en `libx264`; modo no acelerado continúa encabezado por `libx264` |
+| Codificador real diagnosticable | Funcional | Log de exportación registra encoder, codec, hardware, tamaño, FPS, preset y CRF |
+| Audio superpuesto sin límite artificial | Probado | Seis clips simultáneos crean A1–A6; la pista visual rechaza audio |
+| Compilación de la aplicación Windows | Probado | `cargo check -p concat` con FFmpeg/ORT/Sherpa empaquetados |
+| Benchmark audiovisual completo de G&A | Pendiente | Requiere exportación controlada del proyecto real y comparación VMAF/SSIM antes de afirmar equivalencia |
+
+Resultados, límites y reproducción: `docs/p1-4-1-production-hardening.md`.

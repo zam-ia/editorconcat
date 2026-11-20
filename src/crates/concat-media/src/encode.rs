@@ -89,17 +89,15 @@ impl VideoCodec {
     /// encoders (scripts/ffmpeg-mobile.sh), and its cores are no match for
     /// its chip anyway.
     ///
-    /// On a desktop the software encoders lead, and the machine's own
-    /// comes after them for an FFmpeg built without them. With `hardware`,
-    /// the GPU's leads for HEVC and AV1: VideoToolbox on macOS, and on
+    /// On a desktop the software encoders lead unless `hardware` is set.
+    /// With `hardware`, the GPU's leads: VideoToolbox on macOS, and on
     /// Windows and Linux NVIDIA's NVENC, Intel's Quick Sync and AMD's AMF,
     /// in that order - many times faster than x265 and, at these rates, as
     /// good to look at. Whichever of those the machine has no chip for
-    /// does not open, and the export takes the next. H.264 stays with x264
-    /// wherever it is linked: the hardware H.264 encoders spend noticeably
-    /// more bits for the same picture, and H.264 is the choice made for
-    /// compatibility, not speed. Media Foundation, Windows' own, is last:
-    /// it runs on whatever the machine has, and says little about how.
+    /// does not open, and the export takes the next. On Windows H.264 uses
+    /// Quick Sync first in hardware mode, followed by the vendor encoders,
+    /// Media Foundation and finally x264. This keeps the portable fallback
+    /// while avoiding hour-long CPU exports on integrated-graphics laptops.
     pub fn encoders(self, hardware: bool) -> &'static [&'static str] {
         let macos = cfg!(target_os = "macos");
         let windows = cfg!(target_os = "windows");
@@ -119,6 +117,9 @@ impl VideoCodec {
         }
         match self {
             VideoCodec::H264 if macos => &["libx264", "h264_videotoolbox"],
+            VideoCodec::H264 if hardware && windows => {
+                &["h264_qsv", "h264_nvenc", "h264_amf", "h264_mf", "libx264"]
+            }
             VideoCodec::H264 if windows => {
                 &["libx264", "h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"]
             }
@@ -1987,6 +1988,19 @@ mod tests {
         for codec in VideoCodec::ALL {
             assert_eq!(VideoCodec::parse(codec.name()), Some(codec));
         }
+    }
+
+    #[test]
+    fn windows_h264_hardware_mode_leads_with_qsv_and_keeps_x264_fallback() {
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+        let accelerated = VideoCodec::H264.encoders(true);
+        assert_eq!(accelerated.first(), Some(&"h264_qsv"));
+        assert_eq!(accelerated.last(), Some(&"libx264"));
+
+        let compatible = VideoCodec::H264.encoders(false);
+        assert_eq!(compatible.first(), Some(&"libx264"));
     }
 
     #[test]

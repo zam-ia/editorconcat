@@ -1660,6 +1660,18 @@ fn render_picture(
         Encoder::create(destination, request.width, request.height, rate, &options)
     }
     .map_err(|error| error.to_string())?;
+    log::info!(
+        "export: encoder={} codec={} hardware={} size={}x{} rate={}/{} preset={} crf={}",
+        encoder.encoder_name(),
+        request.codec.name(),
+        request.codec.hardware_encoded(true, request.ten_bit),
+        request.width,
+        request.height,
+        request.rate_num,
+        request.rate_den,
+        request.preset,
+        request.crf,
+    );
 
     // How many devices have died under this export so far; see `recovered`.
     let mut losses = 0;

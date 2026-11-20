@@ -5399,7 +5399,7 @@ mod tests {
     }
 
     #[test]
-    fn a_second_overlapping_sound_opens_a2_below_and_visual_tracks_refuse_audio() {
+    fn overlapping_sounds_open_a2_through_a6_and_visual_tracks_refuse_audio() {
         let mut editor = Editor::new();
         let Command::AddMedia { mut item } = media("/music.wav", 10.0, true) else {
             unreachable!()
@@ -5432,25 +5432,36 @@ mod tests {
             Err(crate::CommandError::IncompatibleTrack)
         ));
 
-        let second = editor
-            .apply(Command::AddClipAtFirstFree {
-                media_id,
-                start: 0.0,
-            })
-            .expect("opens a second audio lane")
-            .created_id
-            .expect("clip id");
+        let mut layered = vec![first.clone()];
+        for lane in 2..=6 {
+            layered.push(
+                editor
+                    .apply(Command::AddClipAtFirstFree {
+                        media_id: media_id.clone(),
+                        start: 0.0,
+                    })
+                    .unwrap_or_else(|_| panic!("opens A{lane}"))
+                    .created_id
+                    .expect("clip id"),
+            );
+        }
         let timeline = editor.project().active();
-        assert_eq!(timeline.tracks[0].role, TrackRole::Audio);
-        assert_eq!(timeline.tracks[1].role, TrackRole::Audio);
+        let audio_tracks: Vec<_> = timeline
+            .tracks
+            .iter()
+            .filter(|track| track.role == TrackRole::Audio)
+            .collect();
+        assert_eq!(audio_tracks.len(), 6);
+        let used: std::collections::HashSet<&str> = layered
+            .iter()
+            .map(|id| timeline.clip(id).unwrap().track_id.as_str())
+            .collect();
+        assert_eq!(used.len(), 6, "every overlapping sound gets its own A lane");
         assert_eq!(
-            timeline.clip(&second).unwrap().track_id,
-            timeline.tracks[0].id
+            timeline.clip(&layered[5]).unwrap().track_id,
+            audio_tracks[0].id
         );
-        assert_eq!(
-            timeline.clip(&first).unwrap().track_id,
-            timeline.tracks[1].id
-        );
+        assert_eq!(timeline.clip(&first).unwrap().track_id, audio_tracks[5].id);
     }
 
     #[test]

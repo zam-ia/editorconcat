@@ -606,6 +606,11 @@ pub struct DropPlan {
     pub start: f32,
     pub duration: f32,
     pub row: i32,
+    /// The pointed lane is compatible but already occupied over this span.
+    /// Audio is meant to layer (voice, music, ambience and SFX), so the
+    /// release asks the project command to mint another A lane atomically
+    /// instead of rippling the existing mix out of the way.
+    pub new_track: bool,
 }
 
 /// Every model the window is handed, kept for its lifetime rather than
@@ -4134,6 +4139,7 @@ impl Studio {
                     }
                     .max(MIN_DURATION),
                     row: 0,
+                    new_track: false,
                 })
             }
             // A title: the preset's id rides where a file's media id would,
@@ -4145,6 +4151,7 @@ impl Studio {
                 start: 0.0,
                 duration: LAYER_DURATION,
                 row: 0,
+                new_track: false,
             }),
             // A figure from the Stickers page: the shape's name rides
             // where a file's media id would, and the label is what the
@@ -4156,6 +4163,7 @@ impl Studio {
                 start: 0.0,
                 duration: LAYER_DURATION,
                 row: 0,
+                new_track: false,
             }),
             // A sound from the Audio page: not in the bin yet, so its card
             // rides in `media` behind `sound:`, and the drop imports it.
@@ -4168,6 +4176,7 @@ impl Studio {
                     start: 0.0,
                     duration: (duration as f32).max(MIN_DURATION),
                     row: 0,
+                    new_track: false,
                 })
             }
             // A look dragged from the Filters page: a layer over a span.
@@ -4179,6 +4188,7 @@ impl Studio {
                 start: 0.0,
                 duration: LAYER_DURATION,
                 row: 0,
+                new_track: false,
             }),
             _ => None,
         }
@@ -4207,6 +4217,17 @@ impl Studio {
         plan.start = self
             .snapped(seconds.max(0.0), 8.0 * self.lanes.seconds_per_pixel, "")
             .max(0.0);
+        if plan.kind == ClipKind::Audio {
+            let end = f64::from(plan.start + plan.duration);
+            plan.new_track = self.timeline().clips.iter().any(|clip| {
+                clip.track_id == track.id
+                    && clip.start < end
+                    && clip.start + clip.duration > f64::from(plan.start)
+            });
+            if plan.new_track {
+                plan.label = format!("Nueva pista de audio · {}", plan.label);
+            }
+        }
         Some(plan)
     }
 
@@ -4233,7 +4254,11 @@ impl Studio {
             return;
         };
         if let Some(card) = plan.media.strip_prefix("sound:") {
-            self.place_card(card, Some(track_id), f64::from(plan.start));
+            self.place_card(
+                card,
+                (!plan.new_track).then_some(track_id),
+                f64::from(plan.start),
+            );
             return;
         }
         let created = if plan.kind == ClipKind::Text {
@@ -4265,9 +4290,14 @@ impl Studio {
             // Only the dragged card used to land (reported on Reddit).
             self.apply(Command::AddClipsInSequence {
                 media_ids,
-                track_id: Some(track_id),
+                track_id: (!plan.new_track).then_some(track_id),
                 start: f64::from(plan.start),
                 ripple: true,
+            })
+        } else if plan.new_track {
+            self.apply(Command::AddClipAtFirstFree {
+                media_id: plan.media.clone(),
+                start: f64::from(plan.start),
             })
         } else {
             self.apply(Command::AddClip {
