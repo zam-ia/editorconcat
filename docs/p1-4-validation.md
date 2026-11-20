@@ -7,7 +7,7 @@
 
 | Contrato | Evidencia | Estado |
 |---|---|---|
-| Compatibilidad del modelo 0.2.x | suite completa `concat-project` | 157/157 PASS, incluidos los 154 contratos anteriores y 3 contratos P1.4 |
+| Compatibilidad del modelo 0.2.x | suite completa `concat-project` | 159/159 PASS, incluidos migración segura de pistas antiguas y audio superpuesto |
 | Interpretación de fuente | `source_colour_interpretation_is_undoable_and_persists` | comando, undo/redo y reapertura |
 | Roles y crecimiento | `new_timelines_expose_audio_spine_and_overlay_roles_without_a_track_limit` | 20 pistas visuales + 20 de audio adicionales |
 | Compuesto persistente | `compound_clip_round_trips_edits_and_decomposes_atomically` | crear, guardar, reabrir, editar, descomponer, undo/redo |
@@ -16,18 +16,26 @@
 | Catálogo de efectos | suite completa `concat-effects` | 72/72 PASS; el shader nuevo carga y sus fixtures pasan |
 | Títulos y formas | pruebas `titles::` de `concat-host` | 6/6 PASS; rasterizador y caché sin regresiones |
 | Aplicación Windows | `cargo check -p concat --bin concat` | PASS con la interfaz Slint completa |
-| Ejecutable Windows | `cargo rustc --profile quick`, hash y smoke | PASS; SHA-256 `78FEB508A25436F7456CBD1B86E3B883AD75B822698186FDFC9EA2F40A545419` |
+| Ejecutable Windows | `cargo rustc --profile quick`, hash y smoke | PASS; SHA-256 `B4E25F02B93DBC03FB4AC2BFD54FBF3F5704C86847A0E953977D14748A1C7CDC` |
 
 ## Instalación ligera validada
 
 - Instalado en `C:\Users\USER\AppData\Local\Programs\Concat-Ligero\concat.exe`.
 - El ejecutable instalado y el artefacto `target/quick` tienen el mismo SHA-256.
-- Smoke test Windows: proceso receptivo tras 12 segundos, 182.7 MiB de working set y log de arranque sin errores.
-- Respaldo reversible: `concat.exe.pre-p1-4-20261119-082654.bak`.
+- Smoke test Windows: proceso receptivo tras 12 segundos, 181.5 MiB de working set y log de arranque sin errores.
+- Respaldo reversible de esta corrección: `concat.exe.pre-track-fix-20261119-195438.bak`.
+- Respaldo de G&A anterior a la migración: `concat.before-track-role-fix-20261119-195438.json`.
 
 ## Rendimiento
 
 No se añadió runtime, framework ni modelo de IA. La conversión Log usa un único pase GPU y el compuesto se guarda como estructura de proyecto; no crea archivos intermedios. Las pistas siguen usando las cachés existentes de thumbnails y waveform.
+
+## Corrección de compatibilidad de pistas
+
+Los proyectos 0.2.x con una estructura inequívoca ahora se presentan como A1,
+V1 y overlays sin mover clips ni modificar sus tiempos. Una pista antigua mixta
+permanece en modo `Legacy`. Un segundo audio que coincide en el tiempo abre una
+pista de audio inferior; las pistas visuales rechazan audio.
 
 ## Limitaciones que impiden declarar toda la especificación como cerrada
 

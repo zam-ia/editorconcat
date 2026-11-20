@@ -4192,10 +4192,16 @@ impl Studio {
             return None;
         }
         plan.row = row.clamp(0, lanes - 1);
-        if self
-            .row_track(plan.row)
-            .is_none_or(|track| self.locked(&track.id))
-        {
+        let track = self.row_track(plan.row)?;
+        let kind = match plan.kind {
+            ClipKind::Audio => model::ClipKind::Audio,
+            ClipKind::Image => model::ClipKind::Image,
+            ClipKind::Video => model::ClipKind::Video,
+            ClipKind::Text => model::ClipKind::Text,
+            ClipKind::Shape => model::ClipKind::Shape,
+            ClipKind::Filter => model::ClipKind::Layer,
+        };
+        if self.locked(&track.id) || !track.accepts(kind) {
             return None;
         }
         plan.start = self
@@ -9783,7 +9789,11 @@ impl Studio {
 
         let timeline = self.timeline();
         let mut visual = 2;
-        let mut audio = 1;
+        let mut audio = timeline
+            .tracks
+            .iter()
+            .filter(|lane| lane.role == model::TrackRole::Audio)
+            .count();
         let mut legacy = 1;
         let labels: std::collections::HashMap<&str, (String, i32)> = timeline
             .tracks
@@ -9798,7 +9808,7 @@ impl Studio {
                     }
                     model::TrackRole::Audio => {
                         let label = format!("A{audio}");
-                        audio += 1;
+                        audio = audio.saturating_sub(1);
                         (label, 3)
                     }
                     model::TrackRole::Legacy => {

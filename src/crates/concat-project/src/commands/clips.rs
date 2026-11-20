@@ -26,7 +26,11 @@ pub(super) fn apply(
                 .ok_or(CommandError::MediaGone)?
                 .clone();
             let timeline = project.active_mut();
-            timeline.track(&track_id).ok_or(CommandError::TrackGone)?;
+            let kind = kind_of_media(&media);
+            let track = timeline.track(&track_id).ok_or(CommandError::TrackGone)?;
+            if !track.accepts(kind) {
+                return Err(CommandError::IncompatibleTrack);
+            }
             // Magnetic, the lane makes room; otherwise the clip takes the
             // nearest gap it fits, never the top of another clip.
             let start = if ripple {
@@ -91,6 +95,15 @@ pub(super) fn apply(
             let timeline = project.active_mut();
             let track_id = match track_id {
                 Some(id) if timeline.track(&id).is_none() => return Err(CommandError::TrackGone),
+                Some(id)
+                    if !kinds.iter().all(|kind| {
+                        timeline
+                            .track(&id)
+                            .is_some_and(|track| track.accepts(*kind))
+                    }) =>
+                {
+                    return Err(CommandError::IncompatibleTrack);
+                }
                 Some(id) => id,
                 None if kinds.iter().all(|kind| *kind == kinds[0]) => {
                     first_free_track_for(timeline, start, total, kinds[0])

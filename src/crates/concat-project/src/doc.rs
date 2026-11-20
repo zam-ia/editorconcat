@@ -32,7 +32,9 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
-use crate::model::{Clip, ColorSpace, MediaItem, Project, Timeline, VideoSettings};
+use crate::model::{
+    Clip, ClipKind, ColorSpace, MediaItem, Project, Timeline, TrackRole, VideoSettings,
+};
 
 /// Bumped only when a change cannot be absorbed by defaulting. Read back
 /// on load: a document from a later version is refused whole rather than
@@ -243,7 +245,67 @@ fn settle_timeline(mut timeline: Timeline, media: &[MediaItem]) -> Option<Timeli
         })
         .map(Arc::new)
         .collect();
+    infer_legacy_track_roles(&mut timeline);
     Some(timeline)
+}
+
+/// Gives an unambiguous 0.2.x stack the typed layout it already represents.
+///
+/// Old documents did not say which lane was picture or sound.  We infer only
+/// when there is a real visual spine and at least two lanes: pure-audio lanes
+/// below the lowest picture become A lanes, that lowest picture becomes V1,
+/// and the lanes above it become visual overlays.  A mixed lane or unusual
+/// visual lane below V1 remains `Legacy`, preserving its permissive behaviour.
+fn infer_legacy_track_roles(timeline: &mut Timeline) {
+    if timeline.tracks.len() < 2
+        || timeline
+            .tracks
+            .iter()
+            .any(|track| track.role != TrackRole::Legacy)
+    {
+        return;
+    }
+
+    let contents: Vec<(bool, bool)> = timeline
+        .tracks
+        .iter()
+        .map(|track| {
+            timeline
+                .clips
+                .iter()
+                .filter(|clip| clip.track_id == track.id)
+                .fold((false, false), |(audio, visual), clip| {
+                    (
+                        audio || clip.kind == ClipKind::Audio,
+                        visual || clip.kind != ClipKind::Audio,
+                    )
+                })
+        })
+        .collect();
+    let Some(main_visual) = contents.iter().position(|(_, visual)| *visual) else {
+        return;
+    };
+
+    for (index, track) in timeline.tracks.iter_mut().enumerate() {
+        let (has_audio, has_visual) = contents[index];
+        track.role = if has_audio && has_visual {
+            TrackRole::Legacy
+        } else if has_audio {
+            TrackRole::Audio
+        } else if index == main_visual {
+            TrackRole::MainVisual
+        } else if index > main_visual {
+            TrackRole::Visual
+        } else if !has_visual {
+            // An empty lane below V1 is the audio region.  This is what lets
+            // an old project accept a second soundtrack without rebuilding
+            // or moving any existing clip.
+            TrackRole::Audio
+        } else {
+            TrackRole::Legacy
+        };
+        track.sync_lock = track.role == TrackRole::Visual;
+    }
 }
 
 /// One clip settled, or `None` for one with nowhere to live: no id, a

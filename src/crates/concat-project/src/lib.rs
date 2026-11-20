@@ -5353,6 +5353,107 @@ mod tests {
     }
 
     #[test]
+    fn an_unambiguous_legacy_stack_reopens_as_a1_v1_and_visual_overlays() {
+        let legacy = json!({
+            "name": "Old edit",
+            "version": 1,
+            "video": { "width": 1080, "height": 1920, "rateNum": 30, "rateDen": 1 },
+            "media": [
+                { "id": "ma", "path": "/voice.wav", "name": "voice.wav",
+                  "kind": "audio", "duration": 10.0, "hasAudio": true },
+                { "id": "mv", "path": "/picture.mp4", "name": "picture.mp4",
+                  "kind": "video", "duration": 10.0, "hasAudio": true }
+            ],
+            "tracks": [
+                { "id": "T1", "visible": true, "muted": false },
+                { "id": "T2", "visible": true, "muted": false },
+                { "id": "T3", "visible": true, "muted": false },
+                { "id": "T4", "visible": true, "muted": false }
+            ],
+            "clips": [
+                { "id": "ca", "trackId": "T1", "kind": "audio", "mediaId": "ma",
+                  "start": 0.0, "duration": 10.0 },
+                { "id": "cv", "trackId": "T2", "kind": "video", "mediaId": "mv",
+                  "start": 0.0, "duration": 10.0 },
+                { "id": "co", "trackId": "T3", "kind": "video", "mediaId": "mv",
+                  "start": 2.0, "duration": 2.0 }
+            ]
+        });
+        let editor = Editor::from_document(&legacy).expect("legacy project opens");
+        let tracks = &editor.project().active().tracks;
+        assert_eq!(
+            tracks.iter().map(|track| track.role).collect::<Vec<_>>(),
+            vec![
+                TrackRole::Audio,
+                TrackRole::MainVisual,
+                TrackRole::Visual,
+                TrackRole::Visual,
+            ]
+        );
+        assert!(!tracks[0].sync_lock && !tracks[1].sync_lock);
+        assert!(tracks[2].sync_lock && tracks[3].sync_lock);
+
+        let saved = editor.to_document(&settings());
+        assert_eq!(saved["timelines"][0]["tracks"][0]["role"], "audio");
+        assert_eq!(saved["timelines"][0]["tracks"][1]["role"], "mainVisual");
+    }
+
+    #[test]
+    fn a_second_overlapping_sound_opens_a2_below_and_visual_tracks_refuse_audio() {
+        let mut editor = Editor::new();
+        let Command::AddMedia { mut item } = media("/music.wav", 10.0, true) else {
+            unreachable!()
+        };
+        item.kind = MediaKind::Audio;
+        item.width = None;
+        item.height = None;
+        item.video_codec = None;
+        let media_id = editor
+            .apply(Command::AddMedia { item })
+            .expect("adds sound")
+            .created_id
+            .expect("media id");
+        let first = editor
+            .apply(Command::AddClipAtFirstFree {
+                media_id: media_id.clone(),
+                start: 0.0,
+            })
+            .expect("adds A1")
+            .created_id
+            .expect("clip id");
+        let main_visual = editor.project().active().tracks[1].id.clone();
+        assert!(matches!(
+            editor.apply(Command::AddClip {
+                media_id: media_id.clone(),
+                track_id: main_visual,
+                start: 0.0,
+                ripple: false,
+            }),
+            Err(crate::CommandError::IncompatibleTrack)
+        ));
+
+        let second = editor
+            .apply(Command::AddClipAtFirstFree {
+                media_id,
+                start: 0.0,
+            })
+            .expect("opens a second audio lane")
+            .created_id
+            .expect("clip id");
+        let timeline = editor.project().active();
+        assert_eq!(timeline.tracks[0].role, TrackRole::Audio);
+        assert_eq!(timeline.tracks[1].role, TrackRole::Audio);
+        assert_eq!(
+            timeline.clip(&second).unwrap().track_id,
+            timeline.tracks[0].id
+        );
+        assert_eq!(
+            timeline.clip(&first).unwrap().track_id,
+            timeline.tracks[1].id
+        );
+    }
+
+    #[test]
     fn compound_clip_round_trips_edits_and_decomposes_atomically() {
         let (mut editor, media_id, first) = fixture();
         let overlay_track = editor.project().active().tracks[2].id.clone();

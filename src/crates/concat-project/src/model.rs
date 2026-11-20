@@ -265,7 +265,8 @@ impl TrackRole {
 }
 
 /// A lane. New projects carry an explicit role; old documents deserialize as
-/// `Legacy` and retain the permissive placement rules they were authored with.
+/// `Legacy`. The reader upgrades unambiguous audio/V1/overlay stacks and keeps
+/// ambiguous or mixed lanes permissive.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Track {
