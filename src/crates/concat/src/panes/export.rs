@@ -56,6 +56,13 @@ pub enum ExportMsg {
     Progress {
         /// Of the whole, `0..=1`.
         fraction: f32,
+        /// Frame reached in the video pass. Later stages preserve the last
+        /// frame so the visible counter never jumps backwards.
+        frame: usize,
+        /// Total video frames.
+        total: usize,
+        /// Whether this sample belongs to the video-rendering pass.
+        rendering: bool,
         /// What it is doing, in the person's language.
         stage: String,
     },
@@ -91,6 +98,14 @@ pub struct ExportPane {
     pub written: String,
     /// When the render started, for a real ETA.
     started_at: Option<std::time::Instant>,
+    /// Last video frame reported to the interface.
+    frame: usize,
+    /// Number of frames the video pass must produce.
+    total_frames: usize,
+    /// Sampling point for a rolling render-speed estimate.
+    speed_sample: Option<(std::time::Instant, usize)>,
+    /// Exponentially smoothed rendered frames per second.
+    render_fps: Option<f32>,
 }
 
 impl Default for ExportPane {
@@ -119,6 +134,10 @@ impl Default for ExportPane {
             message: String::new(),
             written: String::new(),
             started_at: None,
+            frame: 0,
+            total_frames: 0,
+            speed_sample: None,
+            render_fps: None,
         }
     }
 }
@@ -193,10 +212,35 @@ impl ExportPane {
                 self.phase = ExportPhase::Idle;
                 self.progress = 0.0;
             }
-            ExportMsg::Progress { fraction, stage } => {
+            ExportMsg::Progress {
+                fraction,
+                frame,
+                total,
+                rendering,
+                stage,
+            } => {
                 if self.phase == ExportPhase::Running {
                     self.progress = fraction.clamp(0.0, 1.0);
                     self.stage = stage;
+                    self.total_frames = total;
+                    if rendering {
+                        self.frame = self.frame.max(frame.min(total));
+                        let now = std::time::Instant::now();
+                        if let Some((sampled_at, sampled_frame)) = self.speed_sample {
+                            let seconds = now.duration_since(sampled_at).as_secs_f32();
+                            let frames = self.frame.saturating_sub(sampled_frame);
+                            if seconds >= 0.2 && frames > 0 {
+                                let current = frames as f32 / seconds;
+                                self.render_fps =
+                                    Some(self.render_fps.map_or(current, |previous| {
+                                        previous * 0.75 + current * 0.25
+                                    }));
+                                self.speed_sample = Some((now, self.frame));
+                            }
+                        } else {
+                            self.speed_sample = Some((now, self.frame));
+                        }
+                    }
                 }
             }
             ExportMsg::Finished(Ok(written)) => {
@@ -477,6 +521,10 @@ impl ExportPane {
         self.message.clear();
         self.written.clear();
         self.started_at = Some(std::time::Instant::now());
+        self.frame = 0;
+        self.total_frames = 0;
+        self.speed_sample = None;
+        self.render_fps = None;
 
         // The export draws on the window's device - a sibling of the
         // monitor's compositor - not on a second device opened through the
@@ -491,10 +539,20 @@ impl ExportPane {
             move || {
                 let job = job;
                 export::run_on(&request, compositor, job.cancel_flag(), |progress| {
-                    let fraction = if progress.total > 0 {
+                    let frame = usize::try_from(progress.frame.max(0)).unwrap_or(0);
+                    let total = usize::try_from(progress.total.max(0)).unwrap_or(0);
+                    let video_fraction = if progress.total > 0 {
                         progress.frame as f32 / progress.total as f32
                     } else {
                         0.0
+                    };
+                    // Video is almost all of the work. Keep the overall bar
+                    // monotonic when audio and muxing report frame zero.
+                    let (fraction, rendering) = match progress.stage {
+                        "rendering" => (video_fraction * 0.97, true),
+                        "mixing audio" => (0.97, false),
+                        "muxing" => (0.99, false),
+                        _ => (video_fraction, false),
                     };
                     let stage = match progress.stage {
                         "rendering" => t("export.renderingVideo"),
@@ -503,7 +561,13 @@ impl ExportPane {
                         other => other.to_owned(),
                     };
                     on_ui(move |studio, _, _| {
-                        studio.handle(Msg::Export(ExportMsg::Progress { fraction, stage }));
+                        studio.handle(Msg::Export(ExportMsg::Progress {
+                            fraction,
+                            frame,
+                            total,
+                            rendering,
+                            stage,
+                        }));
                     });
                 })
             },
@@ -614,6 +678,9 @@ impl ExportPane {
                 if codec.hardware_encoded(true, self.deep(studio)) {
                     words.push(format!("· {}", t("export.hardware")));
                 }
+                if let Some(adapter) = crate::gpu::adapter_description() {
+                    words.push(format!("· GPU {adapter}"));
+                }
                 words.join(" ")
             }
             .into(),
@@ -621,12 +688,31 @@ impl ExportPane {
             phase: self.phase,
             progress: self.progress,
             stage: self.stage.as_str().into(),
-            eta: if self.phase == ExportPhase::Running && self.progress > 0.02 {
+            work: if self.phase == ExportPhase::Running {
                 self.started_at
                     .map(|started| {
-                        let elapsed = started.elapsed().as_secs_f32();
-                        eta(elapsed / self.progress * (1.0 - self.progress)).into()
+                        let elapsed = started.elapsed().as_secs();
+                        let clock = format!("{}:{:02}", elapsed / 60, elapsed % 60);
+                        match self.render_fps {
+                            Some(fps) if self.total_frames > 0 => format!(
+                                "{} / {} · {:.1} fps · {clock}",
+                                self.frame, self.total_frames, fps
+                            ),
+                            _ => clock,
+                        }
+                        .into()
                     })
+                    .unwrap_or_default()
+            } else {
+                slint::SharedString::new()
+            },
+            eta: if self.phase == ExportPhase::Running
+                && self.frame < self.total_frames
+                && self.total_frames > 0
+            {
+                self.render_fps
+                    .filter(|fps| *fps > 0.0)
+                    .map(|fps| eta((self.total_frames - self.frame) as f32 / fps).into())
                     .unwrap_or_default()
             } else {
                 slint::SharedString::new()

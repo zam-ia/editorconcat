@@ -244,3 +244,18 @@ Detalles y límites: `docs/cinematic-color-pipeline.md`,
 | Benchmark audiovisual completo de G&A | Pendiente | Requiere exportación controlada del proyecto real y comparación VMAF/SSIM antes de afirmar equivalencia |
 
 Resultados, límites y reproducción: `docs/p1-4-1-production-hardening.md`.
+
+## Slice P1.4.2 — rendimiento real y calidad
+
+| Contrato P1.4.2 | Estado | Evidencia |
+|---|---|---|
+| Exportación G&A completa | Probado | 1.988 frames; QSV 189.884 s; CPU 252.832 s |
+| Compositor hardware | Probado | Intel UHD/DX12 en log y smoke instalado |
+| Diagnóstico por etapa | Probado | perfiles prepare/compose/encode/audio/mux/total |
+| Progreso útil y monotónico | Compila | frames, fps, transcurrido, ETA móvil y etapa |
+| Calidad visual | Probado | VMAF 98.602; blackdetect sin hallazgos |
+| Audio/sincronía | Probado | métricas EBU iguales; delta final menor a un frame |
+| Instalación P1.4.2 | Pendiente | build release cancelado para liberar la laptop; P1.4.1 optimizado permanece |
+
+Detalles: `docs/p1-4-2-end-to-end-performance.md`,
+`docs/p1-4-2-quality-validation.md` y `docs/p1-4-2-acceptance.md`.

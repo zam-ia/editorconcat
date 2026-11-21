@@ -146,9 +146,15 @@ impl VideoCodec {
     /// the environment has switched off (see [`switched_on`]).
     fn linked(self, hardware: bool, ten_bit: bool) -> impl Iterator<Item = &'static str> {
         ffi::init();
+        // A diagnostic/benchmark process may pin one exact implementation.
+        // The editor never sets this: its normal path keeps the ordered
+        // automatic fallback below. Keeping the override process-local makes
+        // CPU/QSV/MF comparisons use the exact same export request.
+        let forced = std::env::var("CONCAT_ENCODER").ok();
         self.encoders(hardware)
             .iter()
             .copied()
+            .filter(move |name| forced.as_deref().is_none_or(|wanted| *name == wanted))
             .filter(move |name| !ten_bit || takes_ten_bits(name))
             .filter(|name| switched_on(name, |key| std::env::var_os(key)))
             .filter(|name| encoder::find_by_name(name).is_some())

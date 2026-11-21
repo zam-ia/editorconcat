@@ -74,6 +74,9 @@ export struct ExportData {
     progress: float,
     /// "Rendering video"
     stage: string,
+    /// "640 / 1988 · 11.3 fps · 0:56": measurable work rather than an
+    /// opaque percentage alone.
+    work: string,
     eta: string,
     /// why it failed, when it did
     message: string,
@@ -461,6 +464,13 @@ component ExportFooter inherits VerticalLayout {
             font-size: Theme.fs;
             vertical-alignment: center;
         }
+    }
+
+    if root.running && root.data.work != "": Text {
+        text: root.data.work;
+        color: Theme.fg-muted;
+        font-family: Theme.font-technical;
+        font-size: Theme.fs-sm;
     }
 
     if root.running: Progress { value: root.data.progress; live: true; }

@@ -2412,10 +2412,24 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             Ok(cpu) => log::info!("smoke: whisper runs on {cpu}"),
             Err(error) => {
                 log::error!("smoke: {error}");
+                // `leave` ends the process without running destructors. A
+                // diagnostic failure is not a GPU startup crash, so remove
+                // the safe-start mark explicitly instead of forcing the next
+                // real launch onto the software rasteriser.
+                if let Some(mark) = startup_mark.as_ref() {
+                    let _ = std::fs::remove_file(mark.path());
+                }
                 leave(1);
             }
         }
         log::info!("smoke: ok");
+        // `leave` deliberately skips destructors, including Tripwire::drop.
+        // Without this, every successful `concat --smoke` makes the next
+        // normal launch look like a startup crash and permanently enables
+        // the very slow WARP/lavapipe fallback.
+        if let Some(mark) = startup_mark.as_ref() {
+            let _ = std::fs::remove_file(mark.path());
+        }
         leave(0);
     }
 

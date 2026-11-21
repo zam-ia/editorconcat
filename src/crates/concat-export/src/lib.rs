@@ -1075,6 +1075,7 @@ pub fn render_on(
     compositor: Option<WgpuCompositor>,
     mut reporter: Reporter<'_>,
 ) -> Result<String, String> {
+    let export_started = std::time::Instant::now();
     if !request.effect_time_offset.is_finite()
         || request.effect_time_offset.abs() > concat_project::model::ranges::MAX_TIME
     {
@@ -1180,6 +1181,7 @@ pub fn render_on(
     // that failed - the disk full, a read error - left a truncated file
     // where the previous export had been (audit 2026-10-09, finding 4).
     let result = (|| -> Result<(), String> {
+        let video_started = std::time::Instant::now();
         render_picture(
             request,
             compositor,
@@ -1190,6 +1192,10 @@ pub fn render_on(
             &silent,
             &mut reporter,
         )?;
+        log::info!(
+            "export-profile: video_total_ms={:.3}",
+            video_started.elapsed().as_secs_f64() * 1000.0
+        );
 
         let finished = if sound.is_empty() {
             &silent
@@ -1197,16 +1203,32 @@ pub fn render_on(
             reporter.cancelled()?;
             reporter.emit(0, total_frames, "mixing audio");
             let mix: Vec<AudioClip> = sound.iter().flat_map(|clip| audio_pieces(clip)).collect();
+            let audio_started = std::time::Instant::now();
             audio::mix_to_file(&mix, timeline_end, &mixed).map_err(|error| error.to_string())?;
+            log::info!(
+                "export-profile: audio_mix_ms={:.3}",
+                audio_started.elapsed().as_secs_f64() * 1000.0
+            );
 
             reporter.cancelled()?;
             reporter.emit(total_frames, total_frames, "muxing");
+            let mux_started = std::time::Instant::now();
             audio::mux(&silent, &mixed, &muxed).map_err(|error| error.to_string())?;
+            log::info!(
+                "export-profile: mux_ms={:.3}",
+                mux_started.elapsed().as_secs_f64() * 1000.0
+            );
             &muxed
         };
         std::fs::rename(finished, &output)
             .map_err(|error| format!("could not write {}: {error}", output.display()))
     })();
+
+    log::info!(
+        "export-profile: end_to_end_ms={:.3} result={}",
+        export_started.elapsed().as_secs_f64() * 1000.0,
+        if result.is_ok() { "ok" } else { "error" }
+    );
 
     let _ = std::fs::remove_file(&silent);
     let _ = std::fs::remove_file(&mixed);
@@ -1689,7 +1711,13 @@ fn render_picture(
     // through a pool that keeps the reader rolling where it can.
     let sought = concat_media::ReaderPool::with_defaults();
 
+    let mut preparation = StageSamples::default();
+    let mut composition = StageSamples::default();
+    let mut encoding = StageSamples::default();
+    let mut whole_frame = StageSamples::default();
+
     for index in 0..total_frames {
+        let frame_started = std::time::Instant::now();
         reporter.cancelled()?;
 
         let time = rate.time_of_frame(index);
@@ -1821,9 +1849,11 @@ fn render_picture(
             treatments: Vec::new(),
             output: output_of(request.color_space),
         };
+        preparation.push(frame_started.elapsed());
         // The plan is kept for a second drawing: a frame drawn on a device
         // that died under it is black, and is drawn again on the device
         // that takes over. The copy is cheap - the pictures are shared.
+        let compose_started = std::time::Instant::now();
         let mut composed = composite_treated(
             &mut EffectClock {
                 inner: &mut compositor,
@@ -1853,9 +1883,13 @@ fn render_picture(
                 &transitions,
             );
         }
+        composition.push(compose_started.elapsed());
+        let encode_started = std::time::Instant::now();
         encoder
             .write_frame(&composed)
             .map_err(|error| error.to_string())?;
+        encoding.push(encode_started.elapsed());
+        whole_frame.push(frame_started.elapsed());
 
         // Retire decoders whose clip has finished, so a long timeline does not
         // hold an ffmpeg process open for every clip it has ever passed.
@@ -1867,8 +1901,69 @@ fn render_picture(
             said = std::time::Instant::now();
         }
     }
+    let finish_started = std::time::Instant::now();
+    encoder.finish().map_err(|error| error.to_string())?;
+    let finish = finish_started.elapsed();
+    let adapter = compositor.adapter_info();
+    log::info!(
+        "export-profile: frames={} fps={:.3} adapter={:?} device={:?} backend={:?} prepare={} compose_readback={} convert_encode={} frame_total={} encoder_finish_ms={:.3}",
+        total_frames,
+        whole_frame.fps(),
+        adapter.name,
+        adapter.device_type,
+        adapter.backend,
+        preparation.summary(),
+        composition.summary(),
+        encoding.summary(),
+        whole_frame.summary(),
+        finish.as_secs_f64() * 1000.0,
+    );
+    Ok(())
+}
 
-    encoder.finish().map_err(|error| error.to_string())
+#[derive(Default)]
+struct StageSamples {
+    milliseconds: Vec<f64>,
+}
+
+impl StageSamples {
+    fn push(&mut self, elapsed: std::time::Duration) {
+        self.milliseconds.push(elapsed.as_secs_f64() * 1000.0);
+    }
+
+    fn percentile(&self, percentile: f64) -> f64 {
+        if self.milliseconds.is_empty() {
+            return 0.0;
+        }
+        let mut values = self.milliseconds.clone();
+        values.sort_by(f64::total_cmp);
+        let index = ((values.len() - 1) as f64 * percentile).round() as usize;
+        values[index]
+    }
+
+    fn fps(&self) -> f64 {
+        let seconds = self.milliseconds.iter().sum::<f64>() / 1000.0;
+        if seconds > 0.0 {
+            self.milliseconds.len() as f64 / seconds
+        } else {
+            0.0
+        }
+    }
+
+    fn summary(&self) -> String {
+        let total = self.milliseconds.iter().sum::<f64>();
+        let mean = if self.milliseconds.is_empty() {
+            0.0
+        } else {
+            total / self.milliseconds.len() as f64
+        };
+        format!(
+            "total_ms={total:.3},mean_ms={mean:.3},p50_ms={:.3},p95_ms={:.3},p99_ms={:.3}",
+            self.percentile(0.50),
+            self.percentile(0.95),
+            self.percentile(0.99),
+        )
+    }
 }
 
 /// How many frames apart an export says how far it has got, at most.
